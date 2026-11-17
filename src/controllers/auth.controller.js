@@ -1,12 +1,5 @@
 const authService = require('../services/auth.service');
 
-async function signUp(req, res) {
-  const { organizationName, name, email, password, supervisors } = req.body ?? {};
-  const data = await authService.signUp({ organizationName, name, email, password, supervisors });
-
-  res.status(201).json({ data, message: 'Organization created' });
-}
-
 async function logIn(req, res) {
   const { email, password } = req.body ?? {};
   const data = await authService.logIn({ email, password });
@@ -21,15 +14,15 @@ async function logOut(req, res) {
 }
 
 async function me(req, res) {
-  const { userId, email, name, role, tenantId, organizationName } = req.auth;
+  const { userId, email, name, role, siteId, mustChangePassword, tenantId, organizationName } = req.auth;
 
   res.status(200).json({
     data: {
-      user: { id: userId, name, email, role },
+      user: { id: userId, name, email, role, siteId, mustChangePassword },
       organization: { tenantId, organizationName },
     },
     message: 'Profile retrieved',
   });
 }
 
-module.exports = { signUp, logIn, logOut, me };
+module.exports = { logIn, logOut, me };

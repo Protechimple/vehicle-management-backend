@@ -1,8 +1,10 @@
 class AppError extends Error {
-  constructor(statusCode, message) {
+  constructor(statusCode, message, code) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
+    // Optional machine-readable reason, for the client to act on (e.g. PASSWORD_CHANGE_REQUIRED).
+    if (code) this.code = code;
     Error.captureStackTrace(this, AppError);
   }
 
@@ -14,8 +16,8 @@ class AppError extends Error {
     return new AppError(401, message);
   }
 
-  static forbidden(message = 'You do not have permission to perform this action') {
-    return new AppError(403, message);
+  static forbidden(message = 'You do not have permission to perform this action', code) {
+    return new AppError(403, message, code);
   }
 
   static notFound(message = 'Resource not found') {

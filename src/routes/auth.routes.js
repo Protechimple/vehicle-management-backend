@@ -2,11 +2,9 @@ const express = require('express');
 const authController = require('../controllers/auth.controller');
 const passwordResetController = require('../controllers/passwordReset.controller');
 const { authenticated } = require('../middleware/authorize');
-const { authLimiter, signupLimiter } = require('../middleware/rateLimit');
+const { authLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
-
-router.post('/signup', signupLimiter, authController.signUp);
 
 router.post('/login', authLimiter, authController.logIn);
 
