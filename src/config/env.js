@@ -48,11 +48,19 @@ if (isProduction && jwtSecret.length < 32) {
   throw new ConfigError('JWT_SECRET must be at least 32 characters in production.');
 }
 
+// CLIENT_URL may list several origins separated by commas (e.g. with and
+// without www). The first is the primary one used in links sent to users.
+const clientUrls = optional('CLIENT_URL', 'http://localhost:5173')
+  .split(',')
+  .map((url) => url.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 const env = {
   nodeEnv,
   isProduction,
   port: integer('PORT', 8000),
-  clientUrl: optional('CLIENT_URL', 'http://localhost:5173'),
+  clientUrl: clientUrls[0],
+  clientUrls,
 
   db: {
     host: optional('DB_HOST', 'localhost'),

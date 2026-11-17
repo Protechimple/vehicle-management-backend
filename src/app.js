@@ -15,9 +15,14 @@ if (env.isProduction) {
 app.disable('x-powered-by');
 
 app.use(helmet());
-app.use(cors({ origin: env.clientUrl, credentials: true }));
+app.use(cors({ origin: env.clientUrls, credentials: true }));
 
 app.use(express.json({ limit: '100kb' }));
+
+// Simple status response for the bare domain (health checks, host previews).
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', service: 'VMMS API' });
+});
 
 app.use('/api', routes);
 
