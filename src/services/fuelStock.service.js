@@ -1,6 +1,6 @@
 const { Transaction, Op, fn, col } = require('sequelize');
 
-const { SiteFuelStock, FuelStockLedger, FuelCollection, FuelTransaction } = require('../models');
+const { SiteFuelStock, FuelStockLedger, FuelCollection, FuelTransaction, ExternalFuelEntry } = require('../models');
 const AppError = require('../utils/AppError');
 const { requireIdFilter } = require('../utils/validation');
 const { parseListQuery, parseEnumFilter } = require('../utils/queryOptions');
@@ -160,14 +160,16 @@ async function listSiteFuelStock({ tenantId, auth, query }) {
 
 async function referenceLabels(tenantId, entries) {
   const idsOf = (type) => entries.filter((e) => e.referenceType === type).map((e) => e.referenceId);
-  const [collections, issues] = await Promise.all([
+  const [collections, issues, external] = await Promise.all([
     FuelCollection.findAll({ where: { tenantId, id: idsOf('FUEL_COLLECTION') }, attributes: ['id', 'collectionNumber'] }),
     FuelTransaction.findAll({ where: { tenantId, id: idsOf('FUEL_TRANSACTION') }, attributes: ['id', 'assetType', 'assetId'] }),
+    ExternalFuelEntry.findAll({ where: { tenantId, id: idsOf('EXTERNAL_FUEL_ENTRY') }, attributes: ['id', 'vehicleNumber'] }),
   ]);
 
   const labels = new Map();
   for (const c of collections) labels.set(`FUEL_COLLECTION:${c.id}`, c.collectionNumber);
   for (const t of issues) labels.set(`FUEL_TRANSACTION:${t.id}`, t.assetId);
+  for (const e of external) labels.set(`EXTERNAL_FUEL_ENTRY:${e.id}`, e.vehicleNumber);
   return labels;
 }
 

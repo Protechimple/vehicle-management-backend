@@ -22,6 +22,8 @@ const PERMISSIONS = Object.freeze({
   MAINTENANCE: Object.freeze({ ...standardModule, UPDATE_COST: ADMIN_ONLY }),
   SERVICE: standardModule,
   TYRE: standardModule,
+  // Scrapping is normal site work, so a Supervisor may do it. Correcting or deleting a battery's details is the Admin's.
+  BATTERY: Object.freeze({ ...standardModule, SCRAP: BOTH, EDIT_DETAILS: ADMIN_ONLY }),
   FUEL: standardModule,
   ADBLUE: standardModule,
   COMPLIANCE: standardModule,

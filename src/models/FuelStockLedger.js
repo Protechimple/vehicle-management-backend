@@ -2,9 +2,9 @@ const { DataTypes, Model } = require('sequelize');
 const { sequelize } = require('../config/database');
 
 const STORABLE_FUEL_TYPES = ['Diesel', 'Petrol'];
-const ENTRY_TYPES = ['RECEIPT', 'ISSUE', 'ISSUE_REVERSAL'];
+const ENTRY_TYPES = ['RECEIPT', 'ISSUE', 'ISSUE_REVERSAL', 'EXTERNAL_ISSUE', 'EXTERNAL_ISSUE_REVERSAL'];
 const DIRECTIONS = ['IN', 'OUT'];
-const REFERENCE_TYPES = ['FUEL_COLLECTION', 'FUEL_TRANSACTION'];
+const REFERENCE_TYPES = ['FUEL_COLLECTION', 'FUEL_TRANSACTION', 'EXTERNAL_FUEL_ENTRY'];
 
 class FuelStockLedger extends Model {
   toPublicJSON() {

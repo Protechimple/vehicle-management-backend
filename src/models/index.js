@@ -33,6 +33,7 @@ const FuelCollection = require('./FuelCollection');
 const FuelCollectionContainer = require('./FuelCollectionContainer');
 const SiteFuelStock = require('./SiteFuelStock');
 const FuelStockLedger = require('./FuelStockLedger');
+const ExternalFuelEntry = require('./ExternalFuelEntry');
 const TyreType = require('./TyreType');
 const TyrePurchase = require('./TyrePurchase');
 const TyrePurchaseItem = require('./TyrePurchaseItem');
@@ -41,6 +42,8 @@ const TyreFitment = require('./TyreFitment');
 const Maintenance = require('./Maintenance');
 const AdBluePurchase = require('./AdBluePurchase');
 const AdBlueFilling = require('./AdBlueFilling');
+const Battery = require('./Battery');
+const BatteryEvent = require('./BatteryEvent');
 const { ASSET_TYPES, registerAssetModel } = require('../services/asset.service');
 
 Tenant.hasMany(User, { foreignKey: 'tenantId', as: 'users' });
@@ -242,6 +245,9 @@ SiteFuelStock.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
 Tenant.hasMany(FuelStockLedger, { foreignKey: 'tenantId', as: 'fuelStockLedger' });
 FuelStockLedger.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
 
+Tenant.hasMany(ExternalFuelEntry, { foreignKey: 'tenantId', as: 'externalFuelEntries' });
+ExternalFuelEntry.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+
 TyrePurchase.hasMany(TyrePurchaseItem, { foreignKey: 'purchaseId', as: 'items' });
 TyrePurchaseItem.belongsTo(TyrePurchase, { foreignKey: 'purchaseId', as: 'purchase' });
 TyrePurchaseItem.belongsTo(TyreType, { foreignKey: 'tyreTypeId', as: 'tyreType' });
@@ -259,6 +265,11 @@ Tenant.hasMany(AdBluePurchase, { foreignKey: 'tenantId', as: 'adBluePurchases' }
 AdBluePurchase.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
 Tenant.hasMany(AdBlueFilling, { foreignKey: 'tenantId', as: 'adBlueFillings' });
 AdBlueFilling.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+
+Tenant.hasMany(Battery, { foreignKey: 'tenantId', as: 'batteries' });
+Battery.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+Battery.hasMany(BatteryEvent, { foreignKey: 'batteryId', as: 'events' });
+BatteryEvent.belongsTo(Battery, { foreignKey: 'batteryId', as: 'battery' });
 
 module.exports = {
   sequelize,
@@ -296,6 +307,7 @@ module.exports = {
   FuelCollectionContainer,
   SiteFuelStock,
   FuelStockLedger,
+  ExternalFuelEntry,
   TyreType,
   TyrePurchase,
   TyrePurchaseItem,
@@ -304,4 +316,6 @@ module.exports = {
   Maintenance,
   AdBluePurchase,
   AdBlueFilling,
+  Battery,
+  BatteryEvent,
 };
