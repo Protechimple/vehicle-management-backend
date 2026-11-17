@@ -97,7 +97,9 @@ if (env.email.transport === 'smtp' && !env.email.smtp.host) {
 }
 
 if (env.isProduction && env.email.transport === 'console') {
-  throw new ConfigError('EMAIL_TRANSPORT must be "smtp" in production — reset links must not be logged.');
+  throw new ConfigError(
+    'EMAIL_TRANSPORT must be "smtp" (or "none" to disable email) in production — reset links must not be logged.'
+  );
 }
 
 module.exports = env;
