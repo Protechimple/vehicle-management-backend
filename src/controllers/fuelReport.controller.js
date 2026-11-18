@@ -27,4 +27,9 @@ async function collectionsByCarrier(req, res) {
   res.status(200).json({ data, message: 'Fuel collections by carrier retrieved' });
 }
 
-module.exports = { siteRegister, assetConsumption, collections, collectionsByStation, collectionsByCarrier };
+async function externalFuel(req, res) {
+  const data = await fuelReportService.externalFuel(ctx(req));
+  res.status(200).json({ data, message: 'External vehicle fuel report retrieved' });
+}
+
+module.exports = { siteRegister, assetConsumption, collections, collectionsByStation, collectionsByCarrier, externalFuel };

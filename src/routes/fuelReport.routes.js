@@ -16,4 +16,6 @@ router.get('/collections/by-station', requirePermission('REPORTS', 'VIEW'), fuel
 
 router.get('/collections/by-carrier', requirePermission('REPORTS', 'VIEW'), fuelReportController.collectionsByCarrier);
 
+router.get('/external-fuel', requirePermission('REPORTS', 'VIEW'), fuelReportController.externalFuel);
+
 module.exports = router;

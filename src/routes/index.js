@@ -23,8 +23,10 @@ const fuelStationRoutes = require('./fuelStation.routes');
 const fuelCollectionRoutes = require('./fuelCollection.routes');
 const siteFuelStockRoutes = require('./siteFuelStock.routes');
 const fuelReportRoutes = require('./fuelReport.routes');
+const externalFuelRoutes = require('./externalFuel.routes');
 const adblueRoutes = require('./adblue.routes');
 const tyreRoutes = require('./tyre.routes');
+const batteryRoutes = require('./battery.routes');
 const maintenanceRoutes = require('./maintenance.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const brandingRoutes = require('./branding.routes');
@@ -71,10 +73,13 @@ router.use('/fuel-stations', fuelStationRoutes);
 router.use('/fuel-collections', fuelCollectionRoutes);
 router.use('/site-fuel-stock', siteFuelStockRoutes);
 router.use('/fuel-reports', fuelReportRoutes);
+router.use('/external-fuel-entries', externalFuelRoutes);
 
 router.use('/adblue', adblueRoutes);
 
 router.use('/tyres', tyreRoutes);
+
+router.use('/batteries', batteryRoutes);
 
 router.use('/maintenance', maintenanceRoutes);
 

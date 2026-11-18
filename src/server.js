@@ -21,7 +21,9 @@ try {
 
 const app = require('./app');
 const { connectDatabase, disconnectDatabase } = require('./config/database');
-const { assertSchemaIsCurrent } = require('./config/migrator');
+const { assertSchemaIsCurrent, createMigrator } = require('./config/migrator');
+const logger = require('./utils/logger');
+const { seedOrganizationFromEnv } = require('../scripts/seed-organization');
 
 function describeDatabaseFailure(error) {
   const target = `${env.db.host}:${env.db.port}`;
@@ -59,6 +61,28 @@ async function start() {
     await connectDatabase();
   } catch (error) {
     fail('Cannot start — database unavailable:', describeDatabaseFailure(error));
+  }
+
+  // Hosts like Hostinger start this file directly (not `npm start`), so in
+  // production apply pending migrations and the optional seed here.
+  // Set AUTO_MIGRATE=false to opt out, or AUTO_MIGRATE=true to opt in elsewhere.
+  const autoMigrate = process.env.AUTO_MIGRATE
+    ? process.env.AUTO_MIGRATE.trim().toLowerCase() === 'true'
+    : env.isProduction;
+
+  if (autoMigrate) {
+    try {
+      const applied = await createMigrator().up();
+      logger.info('Migrations applied on startup', { count: applied.length });
+    } catch (error) {
+      fail('Cannot start — migrations failed:', [error.message]);
+    }
+
+    try {
+      await seedOrganizationFromEnv((message) => logger.info(message));
+    } catch (error) {
+      fail('Cannot start — seed failed:', [error.message]);
+    }
   }
 
   try {

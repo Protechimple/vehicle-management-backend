@@ -27,6 +27,11 @@ function logEmailToConsole({ to, subject, text }) {
 }
 
 async function sendEmail({ to, subject, text }) {
+  if (env.email.transport === 'none') {
+    logger.warn('Email not sent — EMAIL_TRANSPORT=none', { to, subject });
+    return;
+  }
+
   if (env.email.transport === 'console') {
     logEmailToConsole({ to, subject, text });
     return;

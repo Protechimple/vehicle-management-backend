@@ -48,11 +48,19 @@ if (isProduction && jwtSecret.length < 32) {
   throw new ConfigError('JWT_SECRET must be at least 32 characters in production.');
 }
 
+// CLIENT_URL may list several origins separated by commas (e.g. with and
+// without www). The first is the primary one used in links sent to users.
+const clientUrls = optional('CLIENT_URL', 'http://localhost:5173')
+  .split(',')
+  .map((url) => url.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 const env = {
   nodeEnv,
   isProduction,
   port: integer('PORT', 8000),
-  clientUrl: optional('CLIENT_URL', 'http://localhost:5173'),
+  clientUrl: clientUrls[0],
+  clientUrls,
 
   db: {
     host: optional('DB_HOST', 'localhost'),
@@ -97,7 +105,9 @@ if (env.email.transport === 'smtp' && !env.email.smtp.host) {
 }
 
 if (env.isProduction && env.email.transport === 'console') {
-  throw new ConfigError('EMAIL_TRANSPORT must be "smtp" in production — reset links must not be logged.');
+  throw new ConfigError(
+    'EMAIL_TRANSPORT must be "smtp" (or "none" to disable email) in production — reset links must not be logged.'
+  );
 }
 
 module.exports = env;
