@@ -1,6 +1,6 @@
 const { Op, QueryTypes } = require('sequelize');
 
-const { sequelize, FuelTransaction, FuelCollection, FuelStation, Vehicle, Machinery } = require('../models');
+const { sequelize, FuelTransaction, FuelCollection, FuelStation, Vehicle, Machinery, ExternalFuelEntry } = require('../models');
 const AppError = require('../utils/AppError');
 const { parseEnumFilter } = require('../utils/queryOptions');
 const { siteScope } = require('./fuelStock.service');
@@ -116,6 +116,7 @@ async function siteRegister({ tenantId, auth, query }) {
         opening: emptyAmount(),
         received: emptyAmount(),
         issued: emptyAmount(),
+        external: emptyAmount(),
         closing: emptyAmount(),
         collected: { trips: 0, quantity: 0, amount: 0 },
         transitLoss: emptyAmount(),
@@ -132,6 +133,8 @@ async function siteRegister({ tenantId, auth, query }) {
     if (r.entryType === 'RECEIPT') addTo(row.received, r.quantity, r.value);
     else if (r.entryType === 'ISSUE') addTo(row.issued, r.quantity, r.value);
     else if (r.entryType === 'ISSUE_REVERSAL') addTo(row.issued, -r.quantity, -r.value);
+    else if (r.entryType === 'EXTERNAL_ISSUE') addTo(row.external, r.quantity, r.value);
+    else if (r.entryType === 'EXTERNAL_ISSUE_REVERSAL') addTo(row.external, -r.quantity, -r.value);
   }
   for (const r of collections) {
     const row = rowFor(r.siteId, r.fuelType);
@@ -153,8 +156,8 @@ async function siteRegister({ tenantId, auth, query }) {
 
   for (const row of rows.values()) {
     row.closing = {
-      quantity: roundQuantity(row.opening.quantity + row.received.quantity - row.issued.quantity),
-      value: roundMoney(row.opening.value + row.received.value - row.issued.value),
+      quantity: roundQuantity(row.opening.quantity + row.received.quantity - row.issued.quantity - row.external.quantity),
+      value: roundMoney(row.opening.value + row.received.value - row.issued.value - row.external.value),
     };
   }
 
@@ -294,4 +297,71 @@ async function collectionsSummary({ tenantId, auth, query }) {
   };
 }
 
-module.exports = { siteRegister, assetConsumption, collectionsSummary };
+const vehicleKey = (vehicleNumber) => String(vehicleNumber).replace(/[\s-]+/g, '').toUpperCase();
+
+function emptyExternalGroup(extra) {
+  return { ...extra, entries: 0, vehicles: new Set(), litres: 0, value: 0 };
+}
+
+function addExternal(group, entry) {
+  group.entries += 1;
+  group.vehicles.add(vehicleKey(entry.vehicleNumber));
+  group.litres = roundQuantity(group.litres + Number(entry.quantity));
+  group.value = roundMoney(group.value + Number(entry.amount));
+}
+
+const finishExternalGroup = ({ vehicles, ...rest }) => ({ ...rest, vehicles: vehicles.size });
+
+// Fuel given from site stock to vehicles outside the organization. Valued at the site's average cost.
+async function externalFuel({ tenantId, auth, query }) {
+  const range = readRange(query);
+  const { dateFrom, dateTo } = range;
+  const scope = siteScope(auth, query);
+
+  const where = { tenantId, status: 'active' };
+  const entryDate = whereDateRange(range);
+  if (entryDate) where.entryDate = entryDate;
+  if (scope.siteId) where.siteId = scope.siteId;
+  const fuelType = parseEnumFilter(query.fuelType, STORABLE_FUEL_TYPES, 'Fuel type');
+  if (fuelType) where.fuelType = fuelType;
+  const category = parseEnumFilter(query.category, ExternalFuelEntry.CATEGORIES, 'Category');
+  if (category) where.category = category;
+
+  const entries = await ExternalFuelEntry.findAll({
+    where,
+    order: [['entryDate', 'DESC'], ['entryTime', 'DESC'], ['id', 'DESC']],
+  });
+  const names = await siteNamesById(tenantId, entries.map((e) => e.siteId));
+
+  const totals = emptyExternalGroup({});
+  const parties = new Map();
+  const categories = new Map();
+  for (const entry of entries) {
+    addExternal(totals, entry);
+
+    const partyKey = entry.partyName.trim().toLowerCase();
+    if (!parties.has(partyKey)) parties.set(partyKey, emptyExternalGroup({ partyName: entry.partyName, categories: new Set() }));
+    const party = parties.get(partyKey);
+    party.categories.add(entry.category);
+    addExternal(party, entry);
+
+    if (!categories.has(entry.category)) categories.set(entry.category, emptyExternalGroup({ category: entry.category }));
+    addExternal(categories.get(entry.category), entry);
+  }
+
+  const byParty = [...parties.values()]
+    .map(({ categories: seen, ...party }) => ({ ...finishExternalGroup(party), categories: [...seen].sort() }))
+    .sort((a, b) => b.value - a.value || a.partyName.localeCompare(b.partyName));
+  const byCategory = [...categories.values()].map(finishExternalGroup).sort((a, b) => b.value - a.value);
+
+  return {
+    dateFrom,
+    dateTo,
+    totals: finishExternalGroup(totals),
+    byParty,
+    byCategory,
+    entries: entries.map((e) => ({ ...e.toPublicJSON(), siteName: names.get(e.siteId) ?? null })),
+  };
+}
+
+module.exports = { siteRegister, assetConsumption, collectionsSummary, externalFuel };
