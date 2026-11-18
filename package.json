@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node scripts/seed-organization.js",
+    "seed:super-admin": "node scripts/seed-super-admin.js",
     "dev": "node src/server.js",
     "migrate": "node scripts/migrate.js up",
     "migrate:undo": "node scripts/migrate.js down",
