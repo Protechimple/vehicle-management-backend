@@ -3,27 +3,28 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const env = require('../config/env');
-const { ROLES } = require('../config/permissions');
 const { sequelize, Tenant, User, PasswordResetToken } = require('../models');
 const AppError = require('../utils/AppError');
 const { requireText, requireEmail, requirePassword } = require('../utils/validation');
 const { recordAudit } = require('./audit.service');
-const { createSupervisorRecord } = require('./user.service');
-const emailService = require('./email.service');
 
 const INVALID_CREDENTIALS = 'Invalid email or password';
 
 const ABSENT_ACCOUNT_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), env.bcryptSaltRounds);
-
-function generateTenantId() {
-  return `tenant_${crypto.randomBytes(12).toString('hex')}`;
-}
 
 function issueToken(user, { issuedAt } = {}) {
   const payload = issuedAt ? { sub: String(user.id), iat: issuedAt } : { sub: String(user.id) };
   return jwt.sign(payload, env.jwt.secret, {
     expiresIn: env.jwt.expiresIn,
   });
+}
+
+// Tokens carry their issue time in whole seconds, but a revoke is stored to the millisecond. A sign-in in the same
+// second as a revoke would look older than it and be refused, so its issue time is rounded up past the revoke.
+function tokenOptionsAfterRevoke(revokedAt, now = Date.now()) {
+  if (!revokedAt) return undefined;
+  const revokedSecond = Math.ceil(revokedAt.getTime() / 1000);
+  return revokedSecond > Math.floor(now / 1000) ? { issuedAt: revokedSecond } : undefined;
 }
 
 function buildSession(user, tenant, tokenOptions) {
@@ -35,94 +36,6 @@ function buildSession(user, tenant, tokenOptions) {
       organizationName: tenant.organizationName,
     },
   };
-}
-
-function readSupervisorEntries(supervisors) {
-  if (!Array.isArray(supervisors)) return [];
-  return supervisors
-    .map((entry) => ({
-      name: typeof entry?.name === 'string' ? entry.name.trim() : '',
-      email: typeof entry?.email === 'string' ? entry.email.trim() : '',
-    }))
-    .filter((entry) => entry.name || entry.email);
-}
-
-async function signUp({ organizationName, name, email, password, supervisors }) {
-  const cleanOrganizationName = requireText(organizationName, 'Organization name', { max: 150 });
-  const cleanName = requireText(name, 'Name', { max: 150 });
-  const cleanEmail = requireEmail(email);
-  const cleanPassword = requirePassword(password);
-  const supervisorEntries = readSupervisorEntries(supervisors);
-
-  if (await User.findOne({ where: { email: cleanEmail } })) {
-    throw AppError.conflict('An account with this email already exists');
-  }
-
-  const passwordHash = await bcrypt.hash(cleanPassword, env.bcryptSaltRounds);
-  const tenantId = generateTenantId();
-
-  const { tenant, user, createdSupervisors } = await sequelize.transaction(async (transaction) => {
-    const createdTenant = await Tenant.create(
-      {
-        tenantId,
-        organizationName: cleanOrganizationName,
-        email: cleanEmail,
-        status: 'active',
-      },
-      { transaction }
-    );
-
-    const createdUser = await User.create(
-      {
-        tenantId,
-        name: cleanName,
-        email: cleanEmail,
-        passwordHash,
-        role: ROLES.ADMIN,
-        status: 'active',
-      },
-      { transaction }
-    );
-
-    await recordAudit(
-      {
-        tenantId,
-        entityType: 'Tenant',
-        entityId: tenantId,
-        action: 'ORGANIZATION_CREATED',
-        after: { organizationName: cleanOrganizationName, adminEmail: cleanEmail },
-        performedBy: createdUser.id,
-      },
-      { transaction }
-    );
-
-    const createdSupervisors = [];
-    for (const entry of supervisorEntries) {
-      const result = await createSupervisorRecord({
-        tenantId,
-        actingUserId: createdUser.id,
-        name: entry.name,
-        email: entry.email,
-        transaction,
-      });
-      createdSupervisors.push(result);
-    }
-
-    return { tenant: createdTenant, user: createdUser, createdSupervisors };
-  });
-
-  for (const supervisor of createdSupervisors) {
-    await emailService.sendSupervisorInviteEmail({
-      to: supervisor.email,
-      name: supervisor.name,
-      organizationName: cleanOrganizationName,
-      resetUrl: supervisor.resetUrl,
-      expiresInMinutes: env.passwordResetTtlMinutes,
-    });
-  }
-
-  const safeUser = await User.findByPk(user.id);
-  return buildSession(safeUser, tenant);
 }
 
 async function logIn({ email, password }) {
@@ -166,7 +79,7 @@ async function logIn({ email, password }) {
   });
 
   const safeUser = await User.findByPk(user.id);
-  return buildSession(safeUser, user.tenant);
+  return buildSession(safeUser, user.tenant, tokenOptionsAfterRevoke(user.sessionsRevokedAt));
 }
 
 async function logOut({ userId, tenantId }) {
@@ -289,7 +202,7 @@ async function changeOwnPassword({ tenantId, userId, currentPassword, newPasswor
   const revokedAt = new Date();
 
   await sequelize.transaction(async (transaction) => {
-    await user.update({ passwordHash, sessionsRevokedAt: revokedAt }, { transaction });
+    await user.update({ passwordHash, sessionsRevokedAt: revokedAt, mustChangePassword: false }, { transaction });
 
     await PasswordResetToken.update(
       { usedAt: new Date() },
@@ -312,4 +225,4 @@ async function changeOwnPassword({ tenantId, userId, currentPassword, newPasswor
   return buildSession(safeUser, user.tenant, { issuedAt: Math.ceil(revokedAt.getTime() / 1000) });
 }
 
-module.exports = { signUp, logIn, logOut, updateOwnProfile, changeOwnPassword };
+module.exports = { logIn, logOut, updateOwnProfile, changeOwnPassword, tokenOptionsAfterRevoke };

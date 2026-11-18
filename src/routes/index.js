@@ -1,5 +1,6 @@
 const express = require('express');
 const authRoutes = require('./auth.routes');
+const platformRoutes = require('./platform.routes');
 const userRoutes = require('./user.routes');
 const vehicleRoutes = require('./vehicle.routes');
 const machineryRoutes = require('./machinery.routes');
@@ -43,6 +44,7 @@ router.get('/health', async (_req, res) => {
   }
 });
 
+router.use('/platform', platformRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/vehicles', vehicleRoutes);

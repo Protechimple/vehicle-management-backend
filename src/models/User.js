@@ -22,6 +22,7 @@ class User extends Model {
       status: this.status,
       siteId: this.siteId,
       lastLoginAt: this.lastLoginAt,
+      mustChangePassword: Boolean(this.mustChangePassword),
       createdAt: this.createdAt,
     };
   }
@@ -68,6 +69,11 @@ User.init(
     sessionsRevokedAt: {
       type: DataTypes.DATE(3),
       allowNull: true,
+    },
+    mustChangePassword: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
     siteId: {
       type: DataTypes.INTEGER.UNSIGNED,

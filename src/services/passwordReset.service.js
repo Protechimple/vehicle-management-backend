@@ -82,7 +82,7 @@ async function resetPassword({ token, password }) {
   const passwordHash = await bcrypt.hash(newPassword, env.bcryptSaltRounds);
 
   await sequelize.transaction(async (transaction) => {
-    await user.update({ passwordHash }, { transaction });
+    await user.update({ passwordHash, mustChangePassword: false }, { transaction });
 
     await PasswordResetToken.update(
       { usedAt: new Date() },

@@ -1,6 +1,7 @@
 const { sequelize } = require('../config/database');
 const Tenant = require('./Tenant');
 const User = require('./User');
+const PlatformAdmin = require('./PlatformAdmin');
 const AuditLog = require('./AuditLog');
 const PasswordResetToken = require('./PasswordResetToken');
 const Vehicle = require('./Vehicle');
@@ -275,6 +276,7 @@ module.exports = {
   sequelize,
   Tenant,
   User,
+  PlatformAdmin,
   AuditLog,
   PasswordResetToken,
   Vehicle,

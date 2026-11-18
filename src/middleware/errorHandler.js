@@ -59,7 +59,9 @@ function errorHandler(error, req, res, next) {
     error instanceof AppError ? error : (translateDatabaseError(error) ?? translateUploadError(error));
 
   if (known) {
-    return res.status(known.statusCode).json({ error: known.message });
+    return res
+      .status(known.statusCode)
+      .json(known.code ? { error: known.message, code: known.code } : { error: known.message });
   }
 
   logger.error('Unhandled error', {
