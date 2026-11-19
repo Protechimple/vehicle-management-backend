@@ -21,7 +21,8 @@ const PERMISSIONS = Object.freeze({
   // Correcting a saved cost is the Admin's. A Supervisor enters it once, when finishing the work.
   MAINTENANCE: Object.freeze({ ...standardModule, UPDATE_COST: ADMIN_ONLY }),
   SERVICE: standardModule,
-  TYRE: standardModule,
+  // Moving tyres between sites is the Admin's, like inventory stock transfers.
+  TYRE: Object.freeze({ ...standardModule, TRANSFER: ADMIN_ONLY }),
   // Scrapping is normal site work, so a Supervisor may do it. Correcting or deleting a battery's details is the Admin's.
   BATTERY: Object.freeze({ ...standardModule, SCRAP: BOTH, EDIT_DETAILS: ADMIN_ONLY }),
   FUEL: standardModule,

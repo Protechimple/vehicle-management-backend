@@ -1,10 +1,10 @@
 const { Op } = require('sequelize');
 
-const { TyreFitment, TyrePurchase, TyrePurchaseItem, TyreStock, TyreType } = require('../models');
+const { Tyre, TyreEvent, TyreAssetLayout, TyrePurchase, TyrePurchaseItem, TyreType } = require('../models');
 const AppError = require('../utils/AppError');
 const { parseEnumFilter } = require('../utils/queryOptions');
 const { optionalDateFilter, roundMoney, siteNamesById } = require('./fuelCommon');
-const { siteFilter, assetsByKey, assetSummary, runOf } = require('./tyreCommon');
+const { siteFilter, assetsByKey, assetSummary } = require('./tyreCommon');
 
 function readRange(query) {
   const dateFrom = optionalDateFilter(query.dateFrom, 'From date');
@@ -21,118 +21,111 @@ function dateRange(column, { dateFrom, dateTo }) {
   return { [column]: range };
 }
 
+const sum = (list, pick) => roundMoney(list.reduce((t, x) => t + Number(pick(x) ?? 0), 0));
+
+// One row per vehicle / machine: tyres fitted, punctures, run and money spent on its tyres in the period.
 async function assetReport({ tenantId, auth, query }) {
   const range = readRange(query);
   const siteId = siteFilter(auth, query);
-  const assetType = parseEnumFilter(query.assetType, TyreFitment.ASSET_TYPES, 'Asset type');
+  const assetType = parseEnumFilter(query.assetType, Tyre.ASSET_TYPES, 'Asset type');
+  const assetWhere = assetType ? { assetType } : { assetType: { [Op.ne]: null } };
 
-  const fitments = await TyreFitment.findAll({
-    where: { tenantId, ...(siteId ? { siteId } : {}), ...(assetType ? { assetType } : {}), ...dateRange('fittedAt', range) },
-    include: [{ model: TyreType, as: 'tyreType' }],
-    order: [['fittedAt', 'ASC'], ['id', 'ASC']],
-  });
-  const assets = await assetsByKey(tenantId, fitments);
-  const siteNames = await siteNamesById(tenantId, [...assets.values()].map((a) => a.currentSiteId));
+  const [events, fittedNow] = await Promise.all([
+    TyreEvent.findAll({
+      where: { tenantId, eventType: ['fitted', 'removed', 'puncture'], ...assetWhere, ...(siteId ? { siteId } : {}), ...dateRange('eventDate', range) },
+      order: [['eventDate', 'ASC'], ['id', 'ASC']],
+    }),
+    Tyre.findAll({ where: { tenantId, tyreStatus: 'fitted', ...(assetType ? { assetType } : {}) }, attributes: ['assetType', 'assetId'] }),
+  ]);
+  const assets = await assetsByKey(tenantId, events);
+  const layouts = await TyreAssetLayout.findAll({ where: { tenantId }, attributes: ['assetType', 'assetId', 'axles'] });
+  const needed = new Map(layouts.map((l) => [`${l.assetType}:${l.assetId}`, l.axleList.reduce((t, n) => t + n, 0)]));
+  const onNow = fittedNow.reduce((map, t) => map.set(`${t.assetType}:${t.assetId}`, (map.get(`${t.assetType}:${t.assetId}`) ?? 0) + 1), new Map());
 
   const groups = new Map();
-  for (const f of fitments) {
-    const key = `${f.assetType}:${f.assetId}`;
-    const asset = assets.get(key);
+  for (const e of events) {
+    const key = `${e.assetType}:${e.assetId}`;
     if (!groups.has(key)) {
-      const summary = assetSummary(f.assetType, f.assetId, asset);
-      groups.set(key, { ...summary, siteName: siteNames.get(summary.assetSiteId) ?? null, meterType: f.meterType, tyres: [] });
+      const asset = assets.get(key);
+      groups.set(key, { ...assetSummary(e.assetType, e.assetId, asset), meterType: e.meterType, fitted: 0, punctures: 0, run: 0, tyreCost: 0, punctureCost: 0 });
     }
-    const cost = Number(f.unitCost);
-    groups.get(key).tyres.push({
-      id: f.id,
-      position: f.position,
-      serialNumber: f.serialNumber,
-      tyreTypeLabel: f.tyreType?.label ?? null,
-      tyreSize: f.tyreType?.size ?? null,
-      tyreCondition: f.tyreCondition,
-      fittedAt: f.fittedAt,
-      fitMeterReading: Number(f.fitMeterReading),
-      removedAt: f.removedAt,
-      removeMeterReading: f.removeMeterReading == null ? null : Number(f.removeMeterReading),
-      fitmentStatus: f.fitmentStatus(),
-      isOnAsset: f.removedAt == null,
-      meterType: f.meterType,
-      run: runOf(f, asset),
-      cost,
-    });
+    const g = groups.get(key);
+    if (e.eventType === 'fitted') {
+      g.fitted += 1;
+      g.tyreCost = roundMoney(g.tyreCost + Number(e.amount ?? 0));
+    }
+    if (e.eventType === 'puncture') {
+      g.punctures += 1;
+      g.punctureCost = roundMoney(g.punctureCost + Number(e.amount ?? 0));
+    }
+    if (e.eventType === 'removed' && e.meterType === g.meterType) g.run = roundMoney(g.run + Number(e.runValue ?? 0));
   }
 
-  const rows = [...groups.values()]
-    .map((g) => {
-      const tyreCost = roundMoney(g.tyres.reduce((t, x) => t + x.cost, 0));
-      return {
-        ...g,
-        tyreCount: g.tyres.length,
-        onAssetCount: g.tyres.filter((x) => x.isOnAsset).length,
-        replacedCount: g.tyres.filter((x) => x.fitmentStatus === 'replaced').length,
-        offAssetCount: g.tyres.filter((x) => x.fitmentStatus === 'off').length,
-        tyreRun: roundMoney(g.tyres.filter((x) => x.meterType === g.meterType).reduce((t, x) => t + x.run, 0)),
-        tyreCost,
-      };
-    })
-    .sort((a, b) => b.tyreCost - a.tyreCost || String(a.assetLabel).localeCompare(String(b.assetLabel)));
+  const siteNames = await siteNamesById(tenantId, [...groups.values()].map((g) => g.assetSiteId));
+  const rows = [...groups.entries()]
+    .map(([key, g]) => ({
+      ...g,
+      key,
+      siteName: siteNames.get(g.assetSiteId) ?? null,
+      tyresNeeded: needed.get(key) ?? null,
+      tyresOnNow: onNow.get(key) ?? 0,
+      totalCost: roundMoney(g.tyreCost + g.punctureCost),
+    }))
+    .sort((a, b) => b.totalCost - a.totalCost || String(a.assetLabel).localeCompare(String(b.assetLabel)));
 
-  const all = rows.flatMap((r) => r.tyres);
   return {
     ...range,
     totals: {
-      tyresFitted: all.length,
-      onAssets: all.filter((x) => x.isOnAsset).length,
-      replaced: all.filter((x) => x.fitmentStatus === 'replaced').length,
-      offAsset: all.filter((x) => x.fitmentStatus === 'off').length,
-      tyreCost: roundMoney(all.reduce((t, x) => t + x.cost, 0)),
+      assets: rows.length,
+      tyresFitted: rows.reduce((t, r) => t + r.fitted, 0),
+      punctures: rows.reduce((t, r) => t + r.punctures, 0),
+      tyreCost: sum(rows, (r) => r.tyreCost),
+      punctureCost: sum(rows, (r) => r.punctureCost),
+      totalCost: sum(rows, (r) => r.totalCost),
     },
     rows,
   };
 }
 
+// Where the tyre money went in the period, and what is in the stores now.
 async function costReport({ tenantId, auth, query }) {
   const range = readRange(query);
   const siteId = siteFilter(auth, query);
   const siteWhere = siteId ? { siteId } : {};
 
-  const [purchases, fitted, stocks] = await Promise.all([
+  const [purchases, events, tyres] = await Promise.all([
     TyrePurchase.findAll({ where: { tenantId, status: 'active', ...siteWhere, ...dateRange('purchaseDate', range) } }),
-    TyreFitment.findAll({ where: { tenantId, ...siteWhere, ...dateRange('fittedAt', range) } }),
-    TyreStock.findAll({ where: { tenantId, ...siteWhere } }),
+    TyreEvent.findAll({ where: { tenantId, eventType: ['added_spare', 'puncture', 'remould_back', 'scrapped'], ...siteWhere, ...dateRange('eventDate', range) } }),
+    Tyre.findAll({ where: { tenantId, ...siteWhere } }),
   ]);
-  const items = purchases.length
-    ? await TyrePurchaseItem.findAll({ where: { tenantId, purchaseId: purchases.map((p) => p.id) } })
-    : [];
+  const items = purchases.length ? await TyrePurchaseItem.findAll({ where: { tenantId, purchaseId: purchases.map((p) => p.id) } }) : [];
+  const tyreById = new Map(tyres.map((t) => [t.id, t]));
+  const byKind = (type) => events.filter((e) => e.eventType === type);
+  const scrapped = byKind('scrapped');
 
-  const typeIds = [...new Set([...items, ...fitted, ...stocks].map((x) => x.tyreTypeId))];
+  const typeIds = [...new Set([...items.map((i) => i.tyreTypeId), ...tyres.map((t) => t.tyreTypeId)])];
   const types = typeIds.length ? await TyreType.findAll({ where: { tenantId, id: typeIds } }) : [];
-
   const byType = new Map(
-    types.map((t) => [
-      t.id,
-      { tyreTypeId: t.id, tyreTypeLabel: t.label, tyreSize: t.size, bought: 0, purchaseCost: 0, fitted: 0, fittedCost: 0, inStock: 0, usedInStock: 0, stockValue: 0 },
-    ])
+    types.map((t) => [t.id, { tyreTypeId: t.id, tyreTypeLabel: t.label, tyreSize: t.size, bought: 0, purchaseCost: 0, newStore: 0, spareStore: 0, fitted: 0, scrapped: 0, repairCost: 0 }])
   );
   for (const i of items) {
     const row = byType.get(i.tyreTypeId);
     row.bought += i.quantity;
     row.purchaseCost = roundMoney(row.purchaseCost + Number(i.lineTotal));
   }
-  for (const f of fitted) {
-    const row = byType.get(f.tyreTypeId);
-    row.fitted += 1;
-    row.fittedCost = roundMoney(row.fittedCost + Number(f.unitCost));
+  for (const t of tyres) {
+    const row = byType.get(t.tyreTypeId);
+    if (t.tyreStatus === 'new') row.newStore += 1;
+    if (t.tyreStatus === 'spare') row.spareStore += 1;
+    if (t.tyreStatus === 'fitted') row.fitted += 1;
   }
-  for (const s of stocks) {
-    const row = byType.get(s.tyreTypeId);
-    row.inStock += Number(s.newQuantity);
-    row.usedInStock += Number(s.usedQuantity);
-    row.stockValue = roundMoney(row.stockValue + Number(s.stockValue));
+  for (const e of events) {
+    const tyre = tyreById.get(e.tyreId);
+    const row = tyre && byType.get(tyre.tyreTypeId);
+    if (!row) continue;
+    if (e.eventType === 'scrapped') row.scrapped += 1;
+    if (TyreEvent.REPAIR_EVENTS.includes(e.eventType)) row.repairCost = roundMoney(row.repairCost + Number(e.amount ?? 0));
   }
-  const typeRows = [...byType.values()]
-    .filter((r) => r.bought || r.fitted || r.inStock || r.usedInStock)
-    .sort((a, b) => b.purchaseCost - a.purchaseCost || a.tyreTypeLabel.localeCompare(b.tyreTypeLabel));
 
   const bySupplier = new Map();
   for (const p of purchases) {
@@ -147,20 +140,31 @@ async function costReport({ tenantId, auth, query }) {
     bySupplier.set(key, row);
   }
 
-  const sum = (list, pick) => roundMoney(list.reduce((t, x) => t + pick(x), 0));
+  const inStatus = (status) => tyres.filter((t) => t.tyreStatus === status);
   return {
     ...range,
     totals: {
-      purchaseCost: sum(purchases, (p) => Number(p.totalAmount)),
-      purchaseTax: sum(purchases, (p) => Number(p.taxAmount)),
+      purchaseCost: sum(purchases, (p) => p.totalAmount),
+      purchaseTax: sum(purchases, (p) => p.taxAmount),
       tyresBought: purchases.reduce((t, p) => t + p.tyreCount, 0),
-      fittedCost: sum(fitted, (f) => Number(f.unitCost)),
-      tyresFitted: fitted.length,
-      inStock: stocks.reduce((t, s) => t + Number(s.newQuantity), 0),
-      usedInStock: stocks.reduce((t, s) => t + Number(s.usedQuantity), 0),
-      stockValue: sum(stocks, (s) => Number(s.stockValue)),
+      sparesAdded: byKind('added_spare').length,
+      punctures: byKind('puncture').length,
+      punctureCost: sum(byKind('puncture'), (e) => e.amount),
+      remoulds: byKind('remould_back').length,
+      remouldCost: sum(byKind('remould_back'), (e) => e.amount),
+      scrapped: scrapped.length,
+      scrapValue: sum(scrapped, (e) => e.amount),
+      // What the scrapped tyres had cost in all (purchase + punctures + remoulds).
+      scrappedTyreCost: sum(scrapped, (e) => tyreById.get(e.tyreId)?.totalCost),
+      newStore: inStatus('new').length,
+      newStoreValue: sum(inStatus('new'), (t) => t.purchaseCost),
+      spareStore: inStatus('spare').length,
+      fitted: inStatus('fitted').length,
+      atRemould: inStatus('remould').length,
     },
-    byType: typeRows,
+    byType: [...byType.values()]
+      .filter((r) => r.bought || r.newStore || r.spareStore || r.fitted || r.scrapped || r.repairCost)
+      .sort((a, b) => b.purchaseCost - a.purchaseCost || a.tyreTypeLabel.localeCompare(b.tyreTypeLabel)),
     bySupplier: [...bySupplier.values()].sort((a, b) => b.total - a.total),
   };
 }
