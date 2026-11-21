@@ -8,7 +8,7 @@ const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/q
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordArchive, recordCreate, recordUpdate } = require('./audit.service');
-const { assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, ownSiteFor, siteFilterIds, siteCondition } = require('./siteAccess');
 const { resolveAsset } = require('./asset.service');
 const { roundQuantity, roundMoney, roundUnitCost, requireBusinessDate, optionalDateFilter, requirePositive, siteNamesById } = require('./fuelCommon');
 
@@ -47,15 +47,14 @@ function readDateRange(query) {
   };
 }
 
+// A where-clause value for the sites asked for, or every site the user covers. Null means every site.
 function visibleSiteId(auth, query) {
-  const ownSiteId = supervisorSiteId(auth);
-  if (ownSiteId !== null) return ownSiteId;
-  if (query.siteId === undefined || query.siteId === '') return null;
-  return requireNumber(query.siteId, 'Site', { min: 1 });
+  const siteIds = siteFilterIds(auth, query.siteId);
+  return siteIds ? siteCondition(siteIds) : null;
 }
 
 function readEntrySiteId(auth, payload) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.siteId);
   if (ownSiteId !== null) return ownSiteId;
   return requireNumber(payload.siteId, 'Site', { min: 1 });
 }

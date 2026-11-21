@@ -4,6 +4,7 @@ const { sequelize, FuelTransaction, FuelCollection, FuelStation, Vehicle, Machin
 const AppError = require('../utils/AppError');
 const { parseEnumFilter } = require('../utils/queryOptions');
 const { siteScope } = require('./fuelStock.service');
+const { siteFilterIds } = require('./siteAccess');
 const { summariseEfficiency } = require('./fuelTransaction.service');
 const {
   STORABLE_FUEL_TYPES,
@@ -44,13 +45,13 @@ function addTo(target, quantity, value) {
 async function siteRegister({ tenantId, auth, query }) {
   const range = readRange(query);
   const { dateFrom, dateTo } = range;
-  const scope = siteScope(auth, query);
+  const siteIds = siteFilterIds(auth, query.siteId);
   const fuelType = parseEnumFilter(query.fuelType, STORABLE_FUEL_TYPES, 'Fuel type');
 
   const filters = ['tenant_id = :tenantId'];
-  if (scope.siteId) filters.push('site_id = :siteId');
+  if (siteIds) filters.push('site_id IN (:siteIds)');
   if (fuelType) filters.push('fuel_type = :fuelType');
-  const replacements = { tenantId, siteId: scope.siteId, fuelType, dateFrom, dateTo };
+  const replacements = { tenantId, siteIds, fuelType, dateFrom, dateTo };
   const base = filters.join(' AND ');
 
   const [opening, movements, collections, inTransit, losses, directPump] = await Promise.all([

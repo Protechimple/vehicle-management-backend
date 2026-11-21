@@ -14,11 +14,22 @@ async function logOut(req, res) {
 }
 
 async function me(req, res) {
-  const { userId, email, name, role, siteId, mustChangePassword, tenantId, organizationName } = req.auth;
+  const { userId, email, name, role, siteId, siteIds, managerId, permissions, mustChangePassword, tenantId, organizationName } =
+    req.auth;
 
   res.status(200).json({
     data: {
-      user: { id: userId, name, email, role, siteId, mustChangePassword },
+      user: {
+        id: userId,
+        name,
+        email,
+        role,
+        siteId,
+        siteIds,
+        managerId,
+        permissions: [...permissions].sort(),
+        mustChangePassword,
+      },
       organization: { tenantId, organizationName },
     },
     message: 'Profile retrieved',
