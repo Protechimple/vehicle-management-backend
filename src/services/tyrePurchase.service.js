@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 
-const { sequelize, TyrePurchase, TyrePurchaseItem, TyreType } = require('../models');
+const { sequelize, Tyre, TyreEvent, TyrePurchase, TyrePurchaseItem, TyreType } = require('../models');
 const AppError = require('../utils/AppError');
 const { optionalText, requireNumber, optionalNumber } = require('../utils/validation');
 const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/queryOptions');
@@ -10,13 +10,15 @@ const { recordCreate, recordUpdate } = require('./audit.service');
 const { nextSequentialCode, isCodeCollision } = require('./codeGenerator');
 const { ownSiteFor, assertSiteAllowed } = require('./siteAccess');
 const { requireBusinessDate, optionalDateFilter, roundMoney, siteNamesById } = require('./fuelCommon');
-const { siteFilter, assertSiteUsable, lockStock } = require('./tyreCommon');
+const { siteFilter, assertSiteUsable, readTime } = require('./tyreCommon');
+const { createPurchasedTyres } = require('./tyre.service');
 
 const repo = createTenantScopedRepository(TyrePurchase);
 const NUMBER_PREFIX = 'TP-';
 const NUMBER_ATTEMPTS = 5;
 const MAX_LINES = 50;
-const MAX_QUANTITY = 10000;
+// Every tyre gets its own record and Tyre ID, so one purchase is capped at a bulk-sized number.
+const MAX_QUANTITY = 500;
 
 function readItems(items) {
   if (!Array.isArray(items) || items.length === 0) throw AppError.badRequest('Add at least one tyre line');
@@ -41,7 +43,10 @@ async function decorate(tenantId, purchases, { withItems = false } = {}) {
   const siteNames = await siteNamesById(tenantId, purchases.map((p) => p.siteId));
 
   let itemsByPurchase = new Map();
+  let tyresByPurchase = new Map();
   if (withItems) {
+    const tyres = await Tyre.findAll({ where: { tenantId, purchaseId: purchases.map((p) => p.id) }, attributes: ['id', 'purchaseId', 'tyreCode', 'tyreTypeId', 'tyreStatus'], order: [['id', 'ASC']] });
+    tyresByPurchase = tyres.reduce((map, t) => map.set(t.purchaseId, [...(map.get(t.purchaseId) ?? []), { id: t.id, tyreCode: t.tyreCode, tyreTypeId: t.tyreTypeId, status: t.tyreStatus }]), new Map());
     const items = await TyrePurchaseItem.findAll({
       where: { tenantId, purchaseId: purchases.map((p) => p.id) },
       include: [{ model: TyreType, as: 'tyreType' }],
@@ -58,7 +63,7 @@ async function decorate(tenantId, purchases, { withItems = false } = {}) {
   return purchases.map((p) => ({
     ...p.toPublicJSON(),
     siteName: siteNames.get(p.siteId) ?? null,
-    ...(withItems ? { items: itemsByPurchase.get(p.id) ?? [] } : {}),
+    ...(withItems ? { items: itemsByPurchase.get(p.id) ?? [], tyres: tyresByPurchase.get(p.id) ?? [] } : {}),
   }));
 }
 
@@ -81,7 +86,7 @@ async function listTyrePurchases({ tenantId, auth, query }) {
     const like = { [Op.like]: containsPattern(search) };
     where[Op.or] = [{ purchaseNumber: like }, { billNumber: like }, { supplierName: like }];
   }
-  const { rows, count } = await repo.findAndCountAll(tenantId, { where, order: [...order, ['id', 'DESC']], limit, offset });
+  const { rows, count } = await repo.findAndCountAll(tenantId, { where, order: [...order, ...order.filter(([field]) => field === 'purchaseDate').map(([, direction]) => ['purchaseTime', direction]), ['id', 'DESC']], limit, offset });
   return buildListResponse(await decorate(tenantId, rows), { page, limit, total: count });
 }
 
@@ -103,6 +108,7 @@ async function createTyrePurchase({ tenantId, auth, actingUserId, payload }) {
   const siteId = ownSiteId ?? (await assertSiteUsable(tenantId, payload.siteId));
   const supplierName = optionalText(payload.supplierName, 'Supplier', { max: 255 });
   const purchaseDate = requireBusinessDate(payload.purchaseDate, 'Purchase date');
+  const purchaseTime = readTime(payload.purchaseTime, 'Purchase time');
   const billNumber = optionalText(payload.billNumber, 'Bill / invoice number', { max: 64 });
   const notes = optionalText(payload.notes, 'Notes', { max: 1000 });
   const lines = readItems(payload.items);
@@ -112,6 +118,8 @@ async function createTyrePurchase({ tenantId, auth, actingUserId, payload }) {
   if (types.length !== typeIds.length) throw AppError.badRequest('One of the tyre types was not found');
   if (types.some((t) => t.status !== 'active')) throw AppError.badRequest('One of the tyre types is archived');
 
+  const tyreCount = lines.reduce((sum, l) => sum + l.quantity, 0);
+  if (tyreCount > MAX_QUANTITY) throw AppError.badRequest(`One purchase can have at most ${MAX_QUANTITY} tyres. Split it into two purchases.`);
   const subtotalAmount = roundMoney(lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0));
   const totalAmount = roundMoney(lines.reduce((sum, l) => sum + l.lineTotal, 0));
   const totals = {
@@ -128,7 +136,7 @@ async function createTyrePurchase({ tenantId, auth, actingUserId, payload }) {
       try {
         purchase = await repo.create(
           tenantId,
-          { siteId, supplierName, purchaseDate, billNumber, notes, ...totals, purchaseNumber, status: 'active', createdBy: actingUserId, updatedBy: actingUserId },
+          { siteId, supplierName, purchaseDate, purchaseTime, billNumber, notes, ...totals, purchaseNumber, status: 'active', createdBy: actingUserId, updatedBy: actingUserId },
           { transaction }
         );
         break;
@@ -139,12 +147,9 @@ async function createTyrePurchase({ tenantId, auth, actingUserId, payload }) {
 
     for (const line of lines) {
       await TyrePurchaseItem.create({ tenantId, purchaseId: purchase.id, ...line }, { transaction });
-      const stock = await lockStock(tenantId, siteId, line.tyreTypeId, transaction);
-      await stock.update(
-        { newQuantity: Number(stock.newQuantity) + line.quantity, stockValue: roundMoney(Number(stock.stockValue) + line.lineTotal) },
-        { transaction }
-      );
     }
+    // Each tyre bought gets its own Tyre ID and goes into the New Tyre Store at the purchase site.
+    await createPurchasedTyres(tenantId, { purchase, lines, actingUserId, transaction });
 
     await recordCreate({ tenantId, entityType: 'TyrePurchase', entityId: purchase.id, performedBy: actingUserId, after: purchase }, { transaction });
     return purchase;
@@ -160,25 +165,16 @@ async function cancelTyrePurchase({ tenantId, auth, actingUserId, id, confirmati
     const purchase = await findVisible(tenantId, auth, id, { transaction, lock: transaction.LOCK.UPDATE });
     if (purchase.status === 'cancelled') throw AppError.conflict('This purchase is already cancelled');
 
-    const items = await TyrePurchaseItem.findAll({ where: { tenantId, purchaseId: purchase.id }, transaction });
-    const byType = new Map();
-    for (const item of items) {
-      const entry = byType.get(item.tyreTypeId) ?? { quantity: 0, value: 0 };
-      entry.quantity += item.quantity;
-      entry.value = roundMoney(entry.value + Number(item.lineTotal));
-      byType.set(item.tyreTypeId, entry);
+    // A purchase can be cancelled only while all its tyres are untouched in the New Tyre Store.
+    const tyres = await Tyre.findAll({ where: { tenantId, purchaseId: purchase.id }, transaction, lock: transaction.LOCK.UPDATE });
+    const tyreIds = tyres.map((t) => t.id);
+    const used = tyreIds.length ? await TyreEvent.count({ where: { tenantId, tyreId: tyreIds, eventType: { [Op.ne]: 'purchased' } }, transaction }) : 0;
+    if (used > 0 || tyres.some((t) => t.tyreStatus !== 'new')) {
+      throw AppError.conflict("Some tyres from this purchase have already been used, so it can't be cancelled.");
     }
-
-    for (const [tyreTypeId, entry] of byType) {
-      const stock = await lockStock(tenantId, purchase.siteId, tyreTypeId, transaction);
-      if (Number(stock.newQuantity) < entry.quantity) {
-        throw AppError.conflict(
-          "Some tyres from this purchase have already been fitted, so it can't be cancelled."
-        );
-      }
-      const newQuantity = Number(stock.newQuantity) - entry.quantity;
-      const stockValue = newQuantity === 0 ? 0 : Math.max(0, roundMoney(Number(stock.stockValue) - entry.value));
-      await stock.update({ newQuantity, stockValue }, { transaction });
+    if (tyreIds.length) {
+      await TyreEvent.destroy({ where: { tenantId, tyreId: tyreIds }, transaction });
+      await Tyre.destroy({ where: { tenantId, id: tyreIds }, transaction });
     }
 
     const before = purchase.toJSON();

@@ -24,6 +24,7 @@ const { connectDatabase, disconnectDatabase } = require('./config/database');
 const { assertSchemaIsCurrent, createMigrator } = require('./config/migrator');
 const logger = require('./utils/logger');
 const { seedOrganizationFromEnv } = require('../scripts/seed-organization');
+const { seedSuperAdminFromEnv } = require('../scripts/seed-super-admin');
 
 function describeDatabaseFailure(error) {
   const target = `${env.db.host}:${env.db.port}`;
@@ -82,6 +83,12 @@ async function start() {
       await seedOrganizationFromEnv((message) => logger.info(message));
     } catch (error) {
       fail('Cannot start — seed failed:', [error.message]);
+    }
+
+    try {
+      await seedSuperAdminFromEnv((message) => logger.info(message));
+    } catch (error) {
+      fail('Cannot start — Super Admin seed failed:', [error.message]);
     }
   }
 

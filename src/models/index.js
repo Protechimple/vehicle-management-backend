@@ -38,8 +38,10 @@ const ExternalFuelEntry = require('./ExternalFuelEntry');
 const TyreType = require('./TyreType');
 const TyrePurchase = require('./TyrePurchase');
 const TyrePurchaseItem = require('./TyrePurchaseItem');
-const TyreStock = require('./TyreStock');
-const TyreFitment = require('./TyreFitment');
+const Tyre = require('./Tyre');
+const TyreEvent = require('./TyreEvent');
+const TyreAssetLayout = require('./TyreAssetLayout');
+const TyreTransfer = require('./TyreTransfer');
 const Maintenance = require('./Maintenance');
 const AdBluePurchase = require('./AdBluePurchase');
 const AdBlueFilling = require('./AdBlueFilling');
@@ -263,10 +265,11 @@ TyrePurchase.hasMany(TyrePurchaseItem, { foreignKey: 'purchaseId', as: 'items' }
 TyrePurchaseItem.belongsTo(TyrePurchase, { foreignKey: 'purchaseId', as: 'purchase' });
 TyrePurchaseItem.belongsTo(TyreType, { foreignKey: 'tyreTypeId', as: 'tyreType' });
 TyrePurchase.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
-TyreStock.belongsTo(TyreType, { foreignKey: 'tyreTypeId', as: 'tyreType' });
-TyreStock.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
-TyreFitment.belongsTo(TyreType, { foreignKey: 'tyreTypeId', as: 'tyreType' });
-TyreFitment.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+Tyre.belongsTo(TyreType, { foreignKey: 'tyreTypeId', as: 'tyreType' });
+Tyre.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+Tyre.hasMany(TyreEvent, { foreignKey: 'tyreId', as: 'events' });
+TyreEvent.belongsTo(Tyre, { foreignKey: 'tyreId', as: 'tyre' });
+TyreTransfer.hasMany(TyreEvent, { foreignKey: 'transferId', as: 'events' });
 
 Tenant.hasMany(Maintenance, { foreignKey: 'tenantId', as: 'maintenance' });
 Maintenance.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
@@ -323,8 +326,10 @@ module.exports = {
   TyreType,
   TyrePurchase,
   TyrePurchaseItem,
-  TyreStock,
-  TyreFitment,
+  Tyre,
+  TyreEvent,
+  TyreAssetLayout,
+  TyreTransfer,
   Maintenance,
   AdBluePurchase,
   AdBlueFilling,
