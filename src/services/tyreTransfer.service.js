@@ -2,12 +2,12 @@ const { Op, Transaction } = require('sequelize');
 
 const { sequelize, Tyre, TyreEvent, TyreTransfer, TyreType, User } = require('../models');
 const AppError = require('../utils/AppError');
-const { requireNumber, optionalText, requireIdFilter } = require('../utils/validation');
+const { requireNumber, optionalText } = require('../utils/validation');
 const { parseListQuery } = require('../utils/queryOptions');
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordCreate, recordUpdate } = require('./audit.service');
-const { supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, siteFilterIds, siteCondition } = require('./siteAccess');
 const { nextSequentialCode } = require('./codeGenerator');
 const { requireBusinessDate, optionalDateFilter, siteNamesById } = require('./fuelCommon');
 const { assertSiteUsable, tyreTypeSummary, readTime, isBefore, formatWhen } = require('./tyreCommon');
@@ -55,8 +55,10 @@ async function decorate(tenantId, transfers, { withTyres = false } = {}) {
   }));
 }
 
-async function createTransfer({ tenantId, actingUserId, payload }) {
+async function createTransfer({ tenantId, auth, actingUserId, payload }) {
   const fromSiteId = await assertSiteUsable(tenantId, payload.fromSiteId);
+  // Transfer is Admin-only by default, but can be granted to a role: then tyres may only leave the user's own sites.
+  assertSiteAllowed(auth, fromSiteId, 'Site not found');
   const toSiteId = await assertSiteUsable(tenantId, payload.toSiteId);
   if (fromSiteId === toSiteId) throw AppError.badRequest('Choose a different site to transfer to.');
   const date = requireBusinessDate(payload.date, 'Transfer date');
@@ -101,13 +103,12 @@ async function createTransfer({ tenantId, actingUserId, payload }) {
   return json;
 }
 
-// A Supervisor sees the transfers into and out of their own site.
+// A site user sees the transfers into and out of their own sites.
 async function listTransfers({ tenantId, auth, query }) {
   const { page, limit, offset, order } = parseListQuery(query, { sortableFields: ['transferDate', 'createdAt'], defaultSort: 'transferDate:desc' });
   const and = [];
-  const own = supervisorSiteId(auth);
-  const siteId = own ?? (query.siteId ? requireIdFilter(query.siteId, 'Site') : null);
-  if (siteId) and.push({ [Op.or]: [{ fromSiteId: siteId }, { toSiteId: siteId }] });
+  const siteIds = siteFilterIds(auth, query.siteId);
+  if (siteIds) and.push({ [Op.or]: [{ fromSiteId: siteCondition(siteIds) }, { toSiteId: siteCondition(siteIds) }] });
   const dateFrom = optionalDateFilter(query.dateFrom, 'From date');
   const dateTo = optionalDateFilter(query.dateTo, 'To date');
   if (dateFrom) and.push({ transferDate: { [Op.gte]: dateFrom } });
