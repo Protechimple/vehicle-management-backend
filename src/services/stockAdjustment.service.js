@@ -15,7 +15,7 @@ const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { nextSequentialCode } = require('./codeGenerator');
 const { recordCreate } = require('./audit.service');
-const { scopeToSite, assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { scopeToSite, assertSiteAllowed, ownSiteFor } = require('./siteAccess');
 const { postInventoryTransaction } = require('./inventoryTransaction.service');
 const { latestUnitCost } = require('./stockBatch.service');
 
@@ -109,7 +109,7 @@ async function getStockAdjustment({ tenantId, auth, id }) {
 }
 
 async function createStockAdjustment({ tenantId, auth, actingUserId, payload }) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.siteId);
   const siteId = ownSiteId !== null ? ownSiteId : optionalNumber(payload.siteId, 'Site', { min: 1 });
   if (siteId == null) throw AppError.badRequest('Site is required');
 

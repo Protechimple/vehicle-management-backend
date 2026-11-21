@@ -7,7 +7,7 @@ const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/q
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordCreate, recordUpdate } = require('./audit.service');
-const { assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, siteFilterIds, siteCondition, includesSite } = require('./siteAccess');
 const { resolveAsset } = require('./asset.service');
 const { assetRefsMatchingNumber } = require('./assetIdentifier.service');
 const { nextSequentialCode } = require('./codeGenerator');
@@ -89,10 +89,10 @@ async function atSiteCondition(tenantId, siteId) {
   return { [Op.or]: or };
 }
 
+// A where-clause value for the sites asked for, or every site the user covers. Null means every site.
 function siteFilter(auth, query) {
-  const own = supervisorSiteId(auth);
-  if (own !== null) return own;
-  return query.siteId ? requireIdFilter(query.siteId, 'Site') : null;
+  const siteIds = siteFilterIds(auth, query.siteId);
+  return siteIds ? siteCondition(siteIds) : null;
 }
 
 async function currentSiteOf(tenantId, tyre, transaction) {
@@ -355,7 +355,7 @@ async function layoutHistory(tenantId, layout) {
 
 // The overview on the Vehicle Tyres screen: every asset with axles set or spare tyres, with its setup.
 async function listAssetSetups({ tenantId, auth, query }) {
-  const siteId = siteFilter(auth, query);
+  const siteIds = siteFilterIds(auth, query.siteId);
   const [layouts, fitted, spares] = await Promise.all([
     TyreAssetLayout.findAll({ where: { tenantId } }),
     Tyre.findAll({ where: { tenantId, tyreStatus: 'fitted' }, attributes: ['assetType', 'assetId', [fn('COUNT', col('id')), 'count']], group: ['assetType', 'assetId'], raw: true }),
@@ -384,7 +384,7 @@ async function listAssetSetups({ tenantId, auth, query }) {
   const assets = await assetsByKey(tenantId, [...rows.values()]);
   const visible = [...rows.values()]
     .map((r) => ({ ...r, record: assets.get(r.key) }))
-    .filter((r) => r.record && (!siteId || Number(r.record.currentSiteId) === Number(siteId)));
+    .filter((r) => r.record && (!siteIds || includesSite(siteIds, r.record.currentSiteId)));
   // The last real change of each layout's axles, from the audit log (saving the same axles again isn't logged).
   const layoutIds = visible.filter((r) => r.layout).map((r) => String(r.layout.id));
   const changes = layoutIds.length

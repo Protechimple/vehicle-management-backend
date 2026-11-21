@@ -15,7 +15,9 @@ const {
   scopeToSite,
   assertSiteAllowed,
   assertSiteChangeAllowed,
-  supervisorSiteId,
+  ownSiteFor,
+  siteFilterIds,
+  siteCondition,
 } = require('./siteAccess');
 const { assertSiteAssignable } = require('./site.service');
 const { recordSiteAssignment } = require('./siteAssignment.service');
@@ -131,7 +133,7 @@ async function listMachinery({ tenantId, auth, query }) {
   const status = parseEnumFilter(query.status, Machinery.STATUSES, 'Status') ?? 'active';
   const where = scopeToSite({ status }, auth);
   if (query.fuelType) where.fuelType = query.fuelType;
-  if (query.siteId && supervisorSiteId(auth) === null) where.currentSiteId = requireNumber(query.siteId, 'Site', { min: 1 });
+  if (query.siteId) where.currentSiteId = siteCondition(siteFilterIds(auth, query.siteId));
 
   const search = typeof query.search === 'string' ? query.search.trim() : '';
   if (search) {
@@ -159,7 +161,7 @@ async function getMachine({ tenantId, auth, id }) {
 async function createMachine({ tenantId, auth, actingUserId, payload, files }) {
   const input = readMachineryInput(payload);
   const siteInput = readCurrentSiteIdInput(payload);
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, siteInput.currentSiteId);
   if (ownSiteId !== null) siteInput.currentSiteId = ownSiteId;
   await assertRcplAvailable({ tenantId, value: input.rcpl });
   await assertChassisNumberAvailable({ value: input.serialNumber });
@@ -332,10 +334,11 @@ async function updateMachine({ tenantId, auth, actingUserId, id, payload }) {
   return toPublic(updated);
 }
 
-async function deleteMachine({ tenantId, actingUserId, id, confirmation }) {
+async function deleteMachine({ tenantId, auth, actingUserId, id, confirmation }) {
   const archived = await archiveEntity({
     model: Machinery,
     entityType: 'Machinery',
+    dependencyCheck: (record) => assertSiteAllowed(auth, record.currentSiteId, 'Machinery not found'),
     tenantId,
     id,
     confirmation,
@@ -345,10 +348,11 @@ async function deleteMachine({ tenantId, actingUserId, id, confirmation }) {
   return toPublic(archived);
 }
 
-async function restoreMachine({ tenantId, actingUserId, id }) {
+async function restoreMachine({ tenantId, auth, actingUserId, id }) {
   const restored = await restoreEntity({
     model: Machinery,
     entityType: 'Machinery',
+    dependencyCheck: (record) => assertSiteAllowed(auth, record.currentSiteId, 'Machinery not found'),
     tenantId,
     id,
     performedBy: actingUserId,

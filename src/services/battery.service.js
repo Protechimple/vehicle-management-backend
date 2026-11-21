@@ -7,7 +7,7 @@ const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/q
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordAudit, recordCreate, recordUpdate } = require('./audit.service');
-const { assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, ownSiteFor, siteFilterIds, siteCondition } = require('./siteAccess');
 const { resolveAsset } = require('./asset.service');
 const { assetRefsMatchingNumber } = require('./assetIdentifier.service');
 const { nextSequentialCode } = require('./codeGenerator');
@@ -99,9 +99,8 @@ async function atSiteCondition(tenantId, siteId) {
 }
 
 function siteFilter(auth, query) {
-  const own = supervisorSiteId(auth);
-  if (own !== null) return own;
-  return query.siteId ? requireIdFilter(query.siteId, 'Site') : null;
+  const siteIds = siteFilterIds(auth, query.siteId);
+  return siteIds ? siteCondition(siteIds) : null;
 }
 
 async function currentSiteOf(tenantId, battery, transaction) {
@@ -226,7 +225,7 @@ async function saveBattery(tenantId, battery, changes, { actingUserId, transacti
 // Purchase
 
 async function purchaseBatteries({ tenantId, auth, actingUserId, payload }) {
-  const own = supervisorSiteId(auth);
+  const own = ownSiteFor(auth, payload.siteId);
   const siteId = own ?? requireNumber(payload.siteId, 'Site', { min: 1 });
   const purchaseDate = requireBusinessDate(payload.purchaseDate, 'Purchase date');
   const supplierName = optionalText(payload.supplierName, 'Supplier', { max: 255 });
