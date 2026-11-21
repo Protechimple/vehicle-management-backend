@@ -131,6 +131,7 @@ const ACTION_LABELS = Object.freeze({
   UPDATE_COST: 'Correct cost',
   PRINT: 'Print',
   EXPORT: 'Export',
+  TRANSFER: 'Transfer',
 });
 
 // What the Admin's access screen shows, grouped as the sidebar groups it. Anything not listed here keeps its built-in
