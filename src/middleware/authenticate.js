@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const AppError = require('../utils/AppError');
 const { User, Tenant } = require('../models');
+const { loadAccess } = require('../services/access.service');
 
 const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 
@@ -60,11 +61,18 @@ async function authenticate(req, _res, next) {
     return next(AppError.unauthorized('Invalid or expired token'));
   }
 
+  // Worked out on every request, so a change the Admin makes to someone's sites or access applies at once.
+  const { siteIds, permissions } = await loadAccess(user);
+
   req.auth = {
     userId: user.id,
     tenantId: user.tenantId,
     role: user.role,
-    siteId: user.siteId ?? null,
+    // siteId is the one site of a single-site user. siteIds is every site the user covers; null for the Admin.
+    siteId: siteIds && siteIds.length === 1 ? siteIds[0] : null,
+    siteIds,
+    permissions,
+    managerId: user.managerId ?? null,
     email: user.email,
     name: user.name,
     organizationName: user.tenant.organizationName,

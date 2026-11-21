@@ -60,14 +60,14 @@ function sendPasswordResetEmail({ to, name, resetUrl, expiresInMinutes }) {
   });
 }
 
-function sendSupervisorInviteEmail({ to, name, organizationName, resetUrl, expiresInMinutes }) {
+function sendSupervisorInviteEmail({ to, name, organizationName, resetUrl, expiresInMinutes, roleLabel = 'Supervisor' }) {
   return sendEmail({
     to,
     subject: `You have been added to ${organizationName} on VMMS`,
     text: [
       `Hello ${name},`,
       '',
-      `You have been added to ${organizationName} as a Supervisor.`,
+      `You have been added to ${organizationName} as ${/^[AEIOU]/i.test(roleLabel) ? 'an' : 'a'} ${roleLabel}.`,
       'Use the link below to set your password and sign in:',
       resetUrl,
       '',

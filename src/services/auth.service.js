@@ -7,6 +7,7 @@ const { sequelize, Tenant, User, PasswordResetToken } = require('../models');
 const AppError = require('../utils/AppError');
 const { requireText, requireEmail, requirePassword } = require('../utils/validation');
 const { recordAudit } = require('./audit.service');
+const { loadAccess, publicAccess } = require('./access.service');
 
 const INVALID_CREDENTIALS = 'Invalid email or password';
 
@@ -27,10 +28,11 @@ function tokenOptionsAfterRevoke(revokedAt, now = Date.now()) {
   return revokedSecond > Math.floor(now / 1000) ? { issuedAt: revokedSecond } : undefined;
 }
 
-function buildSession(user, tenant, tokenOptions) {
+async function buildSession(user, tenant, tokenOptions) {
+  const access = publicAccess(await loadAccess(user));
   return {
     token: issueToken(user, tokenOptions),
-    user: user.toPublicJSON(),
+    user: { ...user.toPublicJSON(), ...access, siteId: access.siteIds?.length === 1 ? access.siteIds[0] : null },
     organization: {
       tenantId: tenant.tenantId,
       organizationName: tenant.organizationName,

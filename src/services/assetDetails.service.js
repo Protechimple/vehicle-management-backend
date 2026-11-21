@@ -1,6 +1,6 @@
 const { Vehicle, Machinery } = require('../models');
 const { ASSET_TYPES } = require('./asset.service');
-const { supervisorSiteId } = require('./siteAccess');
+const { allowedSiteIds, includesSite } = require('./siteAccess');
 
 function assetKey(assetType, assetId) {
   return `${assetType}:${assetId}`;
@@ -31,8 +31,8 @@ function toAssetDetails(assetType, asset, auth) {
     details.serialNumber = asset.serialNumber;
   }
 
-  const ownSiteId = supervisorSiteId(auth);
-  if (ownSiteId === null || Number(asset.currentSiteId) === Number(ownSiteId)) {
+  const ownSiteIds = allowedSiteIds(auth);
+  if (ownSiteIds === null || includesSite(ownSiteIds, asset.currentSiteId)) {
     details.id = asset.id;
     details.currentSiteId = asset.currentSiteId;
     details.currentHours = asset.currentHours == null ? null : Number(asset.currentHours);

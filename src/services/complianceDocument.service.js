@@ -7,7 +7,7 @@ const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/q
 const { buildListResponse } = require('../utils/listResponse');
 const { resolveAsset, ASSET_TYPES } = require('./asset.service');
 const { recordCreate, recordUpdate } = require('./audit.service');
-const { supervisorSiteId } = require('./siteAccess');
+const { siteFilterIds } = require('./siteAccess');
 const { toDateOnly } = require('./fuelCommon');
 
 const { DOC_TYPES, ROAD_TAX_TYPES, EXPIRY_WARNING_DAYS } = ComplianceDocument;
@@ -211,14 +211,10 @@ function buildScope({ tenantId, auth, query }) {
   const conditions = ['cd.tenant_id = :tenantId', "COALESCE(v.status, m.status) = 'active'"];
   const replacements = { tenantId, today: toDateOnly(today), warnUntil: toDateOnly(warnUntil) };
 
-  let siteId = supervisorSiteId(auth);
-  if (siteId === null && query.siteId) {
-    siteId = Number(query.siteId);
-    if (!Number.isInteger(siteId) || siteId < 1) throw AppError.badRequest('Site must be a valid site');
-  }
-  if (siteId !== null) {
-    conditions.push('COALESCE(v.current_site_id, m.current_site_id) = :siteId');
-    replacements.siteId = siteId;
+  const siteIds = siteFilterIds(auth, query.siteId);
+  if (siteIds !== null) {
+    conditions.push('COALESCE(v.current_site_id, m.current_site_id) IN (:siteIds)');
+    replacements.siteIds = siteIds;
   }
 
   const docType = parseEnumFilter(query.docType, DOC_TYPES, 'Document type');
@@ -374,7 +370,7 @@ async function getComplianceDashboard({ tenantId, auth, query }) {
   const byType = new Map(typeRows.map((row) => [row.docType, readCounts(row)]));
 
   return {
-    scope: { siteId: replacements.siteId ?? null },
+    scope: { siteId: replacements.siteIds?.length === 1 ? replacements.siteIds[0] : null, siteIds: replacements.siteIds ?? null },
     warningDays: EXPIRY_WARNING_DAYS,
     summary: { ...readCounts(totals), assetsAffected: num(totals.assetsAffected) },
     byDocType: DOC_TYPES.map((docType) => ({ docType, ...(byType.get(docType) ?? readCounts({})) })),

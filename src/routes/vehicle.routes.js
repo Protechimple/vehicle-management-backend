@@ -1,6 +1,6 @@
 const express = require('express');
 const vehicleController = require('../controllers/vehicle.controller');
-const { authenticated, requirePermission } = require('../middleware/authorize');
+const { authenticated, requirePermission, requireAnyPermission, ASSET_LOOKUP } = require('../middleware/authorize');
 const { validateIdParam } = require('../middleware/idParam');
 const { uploadAssetCreationDocuments } = require('../middleware/upload');
 
@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(authenticated);
 router.param('id', validateIdParam('Vehicle not found'));
 
-router.get('/', requirePermission('VEHICLE', 'READ'), vehicleController.list);
+router.get('/', requireAnyPermission([['VEHICLE', 'READ'], ...ASSET_LOOKUP]), vehicleController.list);
 
 router.post(
   '/',

@@ -8,7 +8,7 @@ const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { nextSequentialCode } = require('./codeGenerator');
 const { recordCreate, recordUpdate } = require('./audit.service');
-const { scopeToSite, assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { scopeToSite, assertSiteAllowed, ownSiteFor } = require('./siteAccess');
 const { assertSiteAssignable } = require('./site.service');
 const { postInventoryTransaction } = require('./inventoryTransaction.service');
 const { assertItemsCanTakeStock } = require('./masterData');
@@ -170,7 +170,7 @@ async function getPurchase({ tenantId, auth, id }) {
 }
 
 async function createPurchase({ tenantId, auth, actingUserId, payload }) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.siteId);
   const siteId = ownSiteId !== null ? ownSiteId : optionalNumber(payload.siteId, 'Site', { min: 1 });
   if (siteId == null) throw AppError.badRequest('Site is required');
   await assertSiteAssignable(tenantId, siteId);

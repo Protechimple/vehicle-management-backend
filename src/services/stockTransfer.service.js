@@ -8,7 +8,7 @@ const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { nextSequentialCode } = require('./codeGenerator');
 const { recordCreate, recordUpdate } = require('./audit.service');
-const { assertSiteAllowed, assertEitherSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, assertEitherSiteAllowed, allowedSiteIds, siteCondition, ownSiteFor } = require('./siteAccess');
 const { assertSiteAssignable } = require('./site.service');
 const { postInventoryTransaction } = require('./inventoryTransaction.service');
 const { previewOldestFirstCost } = require('./stockBatch.service');
@@ -84,9 +84,9 @@ async function listStockTransfers({ tenantId, auth, query }) {
   });
 
   const where = {};
-  const ownSiteId = supervisorSiteId(auth);
-  if (ownSiteId !== null) {
-    where[Op.or] = [{ fromSiteId: ownSiteId }, { toSiteId: ownSiteId }];
+  const ownSiteIds = allowedSiteIds(auth);
+  if (ownSiteIds !== null) {
+    where[Op.or] = [{ fromSiteId: siteCondition(ownSiteIds) }, { toSiteId: siteCondition(ownSiteIds) }];
   }
 
   const status = query.status === 'in_transit' || query.status === 'completed' ? query.status : undefined;
@@ -127,7 +127,7 @@ async function getStockTransfer({ tenantId, auth, id }) {
 }
 
 async function createStockTransfer({ tenantId, auth, actingUserId, payload }) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.fromSiteId);
   const fromSiteId = ownSiteId !== null ? ownSiteId : optionalNumber(payload.fromSiteId, 'Source site', { min: 1 });
   if (fromSiteId == null) throw AppError.badRequest('Source site is required');
 

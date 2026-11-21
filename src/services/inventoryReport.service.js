@@ -2,8 +2,7 @@ const { QueryTypes } = require('sequelize');
 
 const { sequelize, Vehicle, Machinery } = require('../models');
 const AppError = require('../utils/AppError');
-const { requireIdFilter } = require('../utils/validation');
-const { supervisorSiteId } = require('./siteAccess');
+const { siteFilterIds } = require('./siteAccess');
 const { roundQuantity, roundMoney, optionalDateFilter } = require('./fuelCommon');
 
 function readRange(query) {
@@ -28,10 +27,9 @@ function rangeClause({ fromAt, toAt }) {
   return `${fromAt ? ' AND t.transaction_at >= :fromAt' : ''}${toAt ? ' AND t.transaction_at < :toAt' : ''}`;
 }
 
+// The sites the report covers, as a list for "IN (:siteId)"; null for every site.
 function siteFilter(auth, query) {
-  const ownSiteId = supervisorSiteId(auth);
-  if (ownSiteId !== null) return ownSiteId;
-  return query.siteId ? requireIdFilter(query.siteId, 'Site') : null;
+  return siteFilterIds(auth, query.siteId);
 }
 
 function select(sql, replacements) {
@@ -72,7 +70,7 @@ async function stockRegister({ tenantId, auth, query }) {
        JOIN items i ON i.id = t.item_id
        LEFT JOIN units_of_measure u ON u.id = i.base_uom_id
        LEFT JOIN stock_adjustment_items sai ON t.transaction_type = 'ADJUSTMENT' AND t.reference_type = 'STOCK_ADJUSTMENT_ITEM' AND sai.id = t.reference_id
-      WHERE t.tenant_id = :tenantId AND t.status = 'posted'${toAt ? ' AND t.transaction_at < :toAt' : ''}${siteId ? ' AND t.site_id = :siteId' : ''}
+      WHERE t.tenant_id = :tenantId AND t.status = 'posted'${toAt ? ' AND t.transaction_at < :toAt' : ''}${siteId ? ' AND t.site_id IN (:siteId)' : ''}
       GROUP BY t.item_id, i.item_code, i.item_name, u.uom_code`,
     { tenantId, siteId, fromAt, toAt }
   );
@@ -150,7 +148,7 @@ async function purchases({ tenantId, auth, query }) {
        LEFT JOIN units_of_measure u ON u.id = i.base_uom_id
       WHERE t.tenant_id = :tenantId AND t.status = 'posted'
         AND t.transaction_type = 'PURCHASE_RECEIPT' AND t.reference_type = 'PURCHASE_ITEM'
-        ${rangeClause({ fromAt, toAt })}${siteId ? ' AND t.site_id = :siteId' : ''}`,
+        ${rangeClause({ fromAt, toAt })}${siteId ? ' AND t.site_id IN (:siteId)' : ''}`,
     { tenantId, siteId, fromAt, toAt }
   );
 
@@ -208,7 +206,7 @@ async function partsByAsset({ tenantId, auth, query }) {
        LEFT JOIN asset_issue_items original ON original.id = iri.asset_issue_item_id
        JOIN asset_issues ai ON ai.id = COALESCE(aii.asset_issue_id, original.asset_issue_id)
       WHERE t.tenant_id = :tenantId AND t.status = 'posted' AND t.transaction_type IN ('ISSUE', 'ISSUE_REVERSAL')
-        ${rangeClause({ fromAt, toAt })}${siteId ? ' AND t.site_id = :siteId' : ''}`,
+        ${rangeClause({ fromAt, toAt })}${siteId ? ' AND t.site_id IN (:siteId)' : ''}`,
     { tenantId, siteId, fromAt, toAt }
   );
 
