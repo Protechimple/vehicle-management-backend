@@ -1,10 +1,7 @@
-const { Transaction } = require('sequelize');
-
-const { Site, TyreStock, Vehicle, Machinery } = require('../models');
+const { Site, Vehicle, Machinery } = require('../models');
 const AppError = require('../utils/AppError');
 const { requireIdFilter } = require('../utils/validation');
 const { supervisorSiteId } = require('./siteAccess');
-const { roundMoney } = require('./fuelCommon');
 
 function siteFilter(auth, query) {
   const own = supervisorSiteId(auth);
@@ -17,10 +14,25 @@ function meterTypeFor(assetType, asset) {
   return asset.isHoursBased ? 'HOURS' : 'KM';
 }
 
-function readingOf(asset, meterType) {
-  if (!asset) return null;
-  const value = meterType === 'HOURS' ? asset.currentHours : asset.currentKM;
-  return value == null ? null : Number(value);
+// Times go next to dates as HH:MM:00, the same as fuel transactions.
+const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
+
+function readTime(value, label = 'Time') {
+  if (typeof value !== 'string' || !TIME_PATTERN.test(value.trim())) throw AppError.badRequest(`${label} is required (HH:MM)`);
+  return `${value.trim().slice(0, 5)}:00`;
+}
+
+// True when date+time A is before date+time B. On the same day, a missing time is never "before".
+function isBefore(dateA, timeA, dateB, timeB) {
+  if (dateA !== dateB) return dateA < dateB;
+  if (!timeA || !timeB) return false;
+  return String(timeA).slice(0, 5) < String(timeB).slice(0, 5);
+}
+
+function formatWhen(dateOnly, time) {
+  const [y, m, d] = String(dateOnly).split('-').map(Number);
+  const day = new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return time ? `${day}, ${String(time).slice(0, 5)}` : day;
 }
 
 function meterUnit(meterType) {
@@ -31,12 +43,6 @@ function formatReading(value) {
   return Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
-function runOf(fitment, asset) {
-  const end = fitment.removedAt != null ? Number(fitment.removeMeterReading) : readingOf(asset, fitment.meterType);
-  if (end == null) return 0;
-  return Math.max(0, roundMoney(end - Number(fitment.fitMeterReading)));
-}
-
 async function assertSiteUsable(tenantId, siteId) {
   const id = Number(siteId);
   if (!Number.isInteger(id) || id < 1) throw AppError.badRequest('Site is required');
@@ -44,14 +50,6 @@ async function assertSiteUsable(tenantId, siteId) {
   if (!site) throw AppError.badRequest('Site not found');
   if (site.status !== 'active') throw AppError.badRequest('This site is archived and cannot be used');
   return id;
-}
-
-async function lockStock(tenantId, siteId, tyreTypeId, transaction) {
-  const where = { tenantId, siteId, tyreTypeId };
-  const existing = await TyreStock.findOne({ where, transaction, lock: Transaction.LOCK.UPDATE });
-  if (existing) return existing;
-  await TyreStock.findOrCreate({ where, defaults: { newQuantity: 0, usedQuantity: 0, stockValue: 0 }, transaction });
-  return TyreStock.findOne({ where, transaction, lock: Transaction.LOCK.UPDATE });
 }
 
 async function assetsByKey(tenantId, rows) {
@@ -82,19 +80,20 @@ function assetSummary(assetType, assetId, asset) {
 }
 
 function tyreTypeSummary(tyreType) {
-  if (!tyreType) return { tyreTypeLabel: null, tyreSize: null };
-  return { tyreTypeLabel: tyreType.label, tyreSize: tyreType.size, tyreTypeCode: tyreType.typeCode };
+  if (!tyreType) return { tyreTypeLabel: null, tyreBrand: null, tyrePattern: null, tyreSize: null };
+  // Brand, pattern / model and size separately, for their own columns; the label joins brand and pattern.
+  return { tyreTypeLabel: tyreType.label, tyreBrand: tyreType.brand, tyrePattern: tyreType.pattern || null, tyreSize: tyreType.size, tyreTypeCode: tyreType.typeCode };
 }
 
 module.exports = {
   siteFilter,
   meterTypeFor,
-  readingOf,
+  readTime,
+  isBefore,
+  formatWhen,
   meterUnit,
   formatReading,
-  runOf,
   assertSiteUsable,
-  lockStock,
   assetsByKey,
   assetSummary,
   tyreTypeSummary,

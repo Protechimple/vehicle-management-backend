@@ -1,6 +1,7 @@
 const { QueryTypes } = require('sequelize');
 
-const { sequelize, Maintenance, TyreFitment } = require('../models');
+const { sequelize, Maintenance } = require('../models');
+const { assetTyreCost } = require('./tyre.service');
 const { roundMoney } = require('./fuelCommon');
 
 const num = (value) => (value == null ? 0 : Number(value));
@@ -27,7 +28,7 @@ async function assetCostSummary({ tenantId, assetType, assetId }) {
   const [maintenance, inventory, tyres] = await Promise.all([
     Maintenance.sum('totalCost', { where: { tenantId, assetType, assetId, status: 'active' } }),
     inventoryCost({ tenantId, assetType, assetId }),
-    TyreFitment.sum('unitCost', { where: { tenantId, assetType, assetId } }),
+    assetTyreCost({ tenantId, assetType, assetId }),
   ]);
   const breakdown = {
     maintenance: roundMoney(num(maintenance)),
