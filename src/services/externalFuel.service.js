@@ -7,7 +7,7 @@ const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/q
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordArchive, recordCreate, recordUpdate } = require('./audit.service');
-const { assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { assertSiteAllowed, ownSiteFor } = require('./siteAccess');
 const { assertSiteAssignable } = require('./site.service');
 const { nextSequentialCode } = require('./codeGenerator');
 const { postFuelMovement, siteScope } = require('./fuelStock.service');
@@ -162,7 +162,7 @@ async function getExternalFuelEntry({ tenantId, auth, id }) {
 }
 
 async function createExternalFuelEntry({ tenantId, auth, actingUserId, payload }) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.siteId);
   const siteId = ownSiteId !== null ? ownSiteId : optionalNumber(payload.siteId, 'Site', { min: 1 });
   if (siteId == null) throw AppError.badRequest('Site is required');
   await assertSiteAssignable(tenantId, siteId);

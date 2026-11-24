@@ -1,8 +1,8 @@
 const { QueryTypes } = require('sequelize');
 
 const { sequelize } = require('../models');
-const { supervisorSiteId } = require('./siteAccess');
-const { requireNumber } = require('../utils/validation');
+const { siteFilterIds, siteSqlClause } = require('./siteAccess');
+const { can } = require('../config/permissions');
 const { todayDateOnly, roundMoney, roundQuantity } = require('./fuelCommon');
 
 const TREND_MONTHS = 6;
@@ -42,11 +42,11 @@ async function fleetSummary(tenantId, siteClause, replacements) {
     replacements
   );
 
-  let sites = 1;
-  if (!replacements.siteId) {
-    const [row] = await query(`SELECT COUNT(*) AS total FROM sites WHERE tenant_id = :tenantId AND status = 'active'`, replacements);
-    sites = num(row.total);
-  }
+  const [siteRow] = await query(
+    `SELECT COUNT(*) AS total FROM sites WHERE tenant_id = :tenantId AND status = 'active'${siteClause('id')}`,
+    replacements
+  );
+  const sites = num(siteRow.total);
 
   return {
     vehicles: num(vehicles.total),
@@ -128,10 +128,35 @@ async function monthlyTrend(tenantId, siteClause, replacements, now) {
   });
 }
 
-async function getSummary({ tenantId, auth }) {
-  const siteId = supervisorSiteId(auth);
-  const replacements = { tenantId, siteId };
-  const siteClause = (column) => (siteId ? ` AND ${column} = :siteId` : '');
+// The dashboard covers the sites asked for, or every site the user covers. A Site Manager sees all of theirs together.
+function requestedSiteScope(tenantId, auth, query = {}) {
+  const siteIds = siteFilterIds(auth, query.siteId);
+  return {
+    siteIds,
+    replacements: { tenantId, siteIds },
+    siteClause: siteSqlClause(siteIds),
+  };
+}
+
+// Figures from modules the user may not open are sent as zero, so the dashboard never shows more than the screens would.
+function visibility(auth) {
+  return { fuel: can(auth, 'FUEL', 'READ'), parts: can(auth, 'STOCK', 'READ') };
+}
+
+function redactMonth(month, { fuel, parts }) {
+  const out = { ...month };
+  if (!fuel) Object.assign(out, { fuel: 0, fuelLitres: 0, fills: 0, fuelBought: 0, fuelBoughtLitres: 0 });
+  if (!parts) Object.assign(out, { parts: 0, issues: 0, purchases: 0 });
+  out.total = roundMoney(out.fuel + out.parts);
+  return out;
+}
+
+function scopeOf(siteIds) {
+  return { siteId: siteIds && siteIds.length === 1 ? siteIds[0] : null, siteIds };
+}
+
+async function getSummary({ tenantId, auth, query }) {
+  const { siteIds, replacements, siteClause } = requestedSiteScope(tenantId, auth, query);
 
   const now = new Date();
   const today = todayDateOnly();
@@ -144,38 +169,121 @@ async function getSummary({ tenantId, auth }) {
   return {
     generatedAt: now.toISOString(),
     period: { today },
-    scope: { siteId },
+    scope: scopeOf(siteIds),
+    visible: visibility(auth),
     fleet,
-    monthly,
-  };
-}
-
-function requestedSiteScope(tenantId, auth, query) {
-  const ownSiteId = supervisorSiteId(auth);
-  const siteId = ownSiteId ?? (query.siteId ? requireNumber(query.siteId, 'Site', { min: 1 }) : null);
-  return {
-    siteId,
-    replacements: { tenantId, siteId },
-    siteClause: (column) => (siteId ? ` AND ${column} = :siteId` : ''),
+    monthly: monthly.map((m) => redactMonth(m, visibility(auth))),
   };
 }
 
 async function getMonthlyCost({ tenantId, auth, query }) {
-  const { siteId, replacements, siteClause } = requestedSiteScope(tenantId, auth, query);
+  const { siteIds, replacements, siteClause } = requestedSiteScope(tenantId, auth, query);
 
   return {
-    scope: { siteId },
-    monthly: await monthlyTrend(tenantId, siteClause, replacements, new Date()),
+    scope: scopeOf(siteIds),
+    visible: visibility(auth),
+    monthly: (await monthlyTrend(tenantId, siteClause, replacements, new Date())).map((m) => redactMonth(m, visibility(auth))),
   };
 }
 
 async function getFleet({ tenantId, auth, query }) {
-  const { siteId, replacements, siteClause } = requestedSiteScope(tenantId, auth, query);
+  const { siteIds, replacements, siteClause } = requestedSiteScope(tenantId, auth, query);
 
   return {
-    scope: { siteId },
+    scope: scopeOf(siteIds),
     fleet: await fleetSummary(tenantId, siteClause, replacements),
   };
 }
 
-module.exports = { getSummary, getMonthlyCost, getFleet };
+const countsBySite = (rows, field = 'total') => new Map(rows.map((row) => [Number(row.siteId), num(row[field])]));
+
+// One row per site in scope: the figures a Site Manager compares their sites by.
+async function getSiteBreakdown({ tenantId, auth, query: params }) {
+  const { siteIds, replacements, siteClause } = requestedSiteScope(tenantId, auth, params);
+  const now = new Date();
+  const monthStart = dateOnly(new Date(now.getFullYear(), now.getMonth(), 1));
+  const range = { ...replacements, monthStart, today: dateOnly(now), monthStartAt: new Date(now.getFullYear(), now.getMonth(), 1), nowAt: now };
+
+  const [sites, vehicles, machinery, openWork, fuel, parts, people] = await Promise.all([
+    query(
+      `SELECT id, name, location FROM sites WHERE tenant_id = :tenantId AND status = 'active'${siteClause('id')} ORDER BY name`,
+      replacements
+    ),
+    query(
+      `SELECT current_site_id AS siteId, COUNT(*) AS total FROM vehicles
+        WHERE tenant_id = :tenantId AND status = 'active'${siteClause('current_site_id')} GROUP BY current_site_id`,
+      replacements
+    ),
+    query(
+      `SELECT current_site_id AS siteId, COUNT(*) AS total FROM machinery
+        WHERE tenant_id = :tenantId AND status = 'active'${siteClause('current_site_id')} GROUP BY current_site_id`,
+      replacements
+    ),
+    query(
+      `SELECT site_id AS siteId, COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN type = 'breakdown' THEN 1 ELSE 0 END), 0) AS breakdowns
+         FROM maintenance
+        WHERE tenant_id = :tenantId AND status = 'active' AND stage <> 'resolved'${siteClause('site_id')} GROUP BY site_id`,
+      replacements
+    ),
+    query(
+      `SELECT site_id AS siteId, COALESCE(SUM(amount), 0) AS cost, COALESCE(SUM(quantity), 0) AS litres
+         FROM fuel_transactions
+        WHERE tenant_id = :tenantId AND status = 'active' AND txn_date >= :monthStart AND txn_date <= :today${siteClause('site_id')}
+        GROUP BY site_id`,
+      range
+    ),
+    query(
+      `SELECT site_id AS siteId,
+              COALESCE(SUM(CASE WHEN transaction_type = 'ISSUE' THEN total_cost
+                                WHEN transaction_type = 'ISSUE_REVERSAL' THEN -total_cost ELSE 0 END), 0) AS cost
+         FROM inventory_transactions
+        WHERE tenant_id = :tenantId AND status = 'posted' AND transaction_type IN ('ISSUE', 'ISSUE_REVERSAL')
+          AND transaction_at >= :monthStartAt AND transaction_at <= :nowAt${siteClause('site_id')}
+        GROUP BY site_id`,
+      range
+    ),
+    query(
+      `SELECT us.site_id AS siteId, COUNT(*) AS total
+         FROM user_sites us JOIN users u ON u.id = us.user_id
+        WHERE us.tenant_id = :tenantId AND u.status = 'active'${siteClause('us.site_id')} GROUP BY us.site_id`,
+      replacements
+    ),
+  ]);
+
+  const vehicleCounts = countsBySite(vehicles);
+  const machineryCounts = countsBySite(machinery);
+  const openCounts = countsBySite(openWork);
+  const breakdownCounts = countsBySite(openWork, 'breakdowns');
+  const fuelCost = countsBySite(fuel, 'cost');
+  const fuelLitres = countsBySite(fuel, 'litres');
+  const partsCost = countsBySite(parts, 'cost');
+  const peopleCounts = countsBySite(people);
+  const visible = visibility(auth);
+
+  return {
+    scope: scopeOf(siteIds),
+    month: monthKey(now),
+    sites: sites.map((site) => {
+      const id = Number(site.id);
+      const fuelThisMonth = visible.fuel ? roundMoney(fuelCost.get(id) ?? 0) : 0;
+      const partsThisMonth = visible.parts ? roundMoney(partsCost.get(id) ?? 0) : 0;
+      return {
+        siteId: id,
+        name: site.name,
+        location: site.location,
+        vehicles: vehicleCounts.get(id) ?? 0,
+        machinery: machineryCounts.get(id) ?? 0,
+        openMaintenance: openCounts.get(id) ?? 0,
+        openBreakdowns: breakdownCounts.get(id) ?? 0,
+        fuelCost: fuelThisMonth,
+        fuelLitres: visible.fuel ? roundQuantity(fuelLitres.get(id) ?? 0) : 0,
+        partsCost: partsThisMonth,
+        runningCost: roundMoney(fuelThisMonth + partsThisMonth),
+        staff: peopleCounts.get(id) ?? 0,
+      };
+    }),
+  };
+}
+
+module.exports = { getSummary, getMonthlyCost, getFleet, getSiteBreakdown };

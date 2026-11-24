@@ -1,16 +1,16 @@
 const { Op, Transaction } = require('sequelize');
 
 const { sequelize, Maintenance, Site, Vehicle, Machinery } = require('../models');
-const { hasPermission } = require('../config/permissions');
+const { can } = require('../config/permissions');
 const { machineAssetIdsMatchingRcpl, vehicleAssetIdsMatchingRegistration } = require('./assetIdentifier.service');
 const AppError = require('../utils/AppError');
-const { requireText, optionalText, optionalNumber, isValidDateTime, requireIdFilter } = require('../utils/validation');
+const { requireText, optionalText, optionalNumber, isValidDateTime } = require('../utils/validation');
 const { assertMeterNotDecreasing } = require('../utils/meter');
 const { parseListQuery, parseEnumFilter, containsPattern } = require('../utils/queryOptions');
 const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordArchive, recordAudit, recordCreate, recordUpdate } = require('./audit.service');
-const { scopeToSite, assertSiteAllowed, supervisorSiteId } = require('./siteAccess');
+const { scopeToSite, assertSiteAllowed, allowedSiteIds, siteFilterIds, siteCondition } = require('./siteAccess');
 const { resolveAsset, ASSET_TYPES } = require('./asset.service');
 const { roundMoney, optionalDateFilter } = require('./fuelCommon');
 const { AUDIT_ENTITY_FOR_ASSET, meterFields, lockAsset } = require('./assetMeter.service');
@@ -85,11 +85,11 @@ function readCosts(payload, existing = {}) {
 }
 
 function assertCostChangeAllowed(auth, costs, record, { firstEntryAllowed = false } = {}) {
-  if (hasPermission(auth.role, 'MAINTENANCE', 'UPDATE_COST')) return;
+  if (can(auth, 'MAINTENANCE', 'UPDATE_COST')) return;
   for (const [field, value] of Object.entries(costs)) {
     const saved = toNumber(record[field]);
     if (value === saved || (firstEntryAllowed && saved === null)) continue;
-    throw AppError.forbidden('Only an Admin can change maintenance costs');
+    throw AppError.forbidden('You do not have permission to change maintenance costs');
   }
 }
 
@@ -158,10 +158,13 @@ function startOfLocalDay(dateOnly) {
 
 // A supervisor can read an asset's whole history once it is at their site, including records from its earlier sites.
 async function isAssetAtOwnSite(tenantId, auth, assetType, assetId) {
-  const siteId = supervisorSiteId(auth);
-  if (siteId === null || !assetType || !assetId) return false;
+  const siteIds = allowedSiteIds(auth);
+  if (siteIds === null || !assetType || !assetId) return false;
   const model = assetType === ASSET_TYPES.VEHICLE ? Vehicle : Machinery;
-  const asset = await model.findOne({ where: { tenantId, assetId: String(assetId), currentSiteId: siteId }, attributes: ['id'] });
+  const asset = await model.findOne({
+    where: { tenantId, assetId: String(assetId), currentSiteId: siteCondition(siteIds) },
+    attributes: ['id'],
+  });
   return Boolean(asset);
 }
 
@@ -183,7 +186,7 @@ async function listMaintenance({ tenantId, auth, query }) {
 
   if (assetType) where.assetType = assetType;
   if (query.assetId) where.assetId = String(query.assetId);
-  if (query.siteId && supervisorSiteId(auth) === null) where.siteId = requireIdFilter(query.siteId, 'Site');
+  if (query.siteId) where.siteId = siteCondition(siteFilterIds(auth, query.siteId));
 
   const dateFrom = optionalDateFilter(query.dateFrom, 'From date');
   const dateTo = optionalDateFilter(query.dateTo, 'To date');
@@ -338,9 +341,9 @@ async function listPreventiveSchedule({ tenantId, auth, query }) {
 }
 
 async function getDashboardSummary({ tenantId, auth, siteId: requestedSiteId = null }) {
-  const siteId = supervisorSiteId(auth) ?? requestedSiteId;
-  const assetWhere = siteId ? { tenantId, status: 'active', currentSiteId: siteId } : { tenantId, status: 'active' };
-  const workWhere = siteId ? { tenantId, status: 'active', siteId } : { tenantId, status: 'active' };
+  const siteIds = siteFilterIds(auth, requestedSiteId);
+  const assetWhere = siteIds ? { tenantId, status: 'active', currentSiteId: siteCondition(siteIds) } : { tenantId, status: 'active' };
+  const workWhere = siteIds ? { tenantId, status: 'active', siteId: siteCondition(siteIds) } : { tenantId, status: 'active' };
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -371,7 +374,7 @@ async function getDashboardSummary({ tenantId, auth, siteId: requestedSiteId = n
   }
 
   return {
-    scope: { siteId },
+    scope: { siteId: siteIds && siteIds.length === 1 ? siteIds[0] : null, siteIds },
     service: {
       overdue: vehiclesOverdue + machinesOverdue,
       dueSoon: vehiclesDueSoon + machinesDueSoon,

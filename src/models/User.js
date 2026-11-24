@@ -21,6 +21,7 @@ class User extends Model {
       role: this.role,
       status: this.status,
       siteId: this.siteId,
+      managerId: this.managerId ?? null,
       lastLoginAt: this.lastLoginAt,
       mustChangePassword: Boolean(this.mustChangePassword),
       createdAt: this.createdAt,
@@ -54,7 +55,7 @@ User.init(
       allowNull: false,
     },
     role: {
-      type: DataTypes.ENUM(ROLES.ADMIN, ROLES.SUPERVISOR),
+      type: DataTypes.ENUM(...Object.values(ROLES)),
       allowNull: false,
     },
     status: {
@@ -79,6 +80,11 @@ User.init(
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: true,
       references: { model: 'sites', key: 'id' },
+    },
+    managerId: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
     },
   },
   {

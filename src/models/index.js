@@ -47,6 +47,9 @@ const AdBluePurchase = require('./AdBluePurchase');
 const AdBlueFilling = require('./AdBlueFilling');
 const Battery = require('./Battery');
 const BatteryEvent = require('./BatteryEvent');
+const UserSite = require('./UserSite');
+const RolePermission = require('./RolePermission');
+const UserPermission = require('./UserPermission');
 const { ASSET_TYPES, registerAssetModel } = require('../services/asset.service');
 
 Tenant.hasMany(User, { foreignKey: 'tenantId', as: 'users' });
@@ -59,6 +62,13 @@ AuditLog.belongsTo(User, { foreignKey: 'performedBy', as: 'performer' });
 
 User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetTokens', onDelete: 'CASCADE' });
 PasswordResetToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+User.belongsTo(User, { foreignKey: 'managerId', as: 'manager' });
+User.hasMany(User, { foreignKey: 'managerId', as: 'reports' });
+User.hasMany(UserSite, { foreignKey: 'userId', as: 'managedSites', onDelete: 'CASCADE' });
+UserSite.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+UserSite.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
+User.hasMany(UserPermission, { foreignKey: 'userId', as: 'permissionOverrides', onDelete: 'CASCADE' });
 
 Tenant.hasMany(Vehicle, { foreignKey: 'tenantId', as: 'vehicles' });
 Vehicle.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
@@ -325,4 +335,7 @@ module.exports = {
   AdBlueFilling,
   Battery,
   BatteryEvent,
+  UserSite,
+  RolePermission,
+  UserPermission,
 };

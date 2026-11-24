@@ -1,39 +1,46 @@
 const express = require('express');
 const userController = require('../controllers/user.controller');
-const { adminOnly, requirePermission } = require('../middleware/authorize');
+const { authenticated, adminOnly, requirePermission } = require('../middleware/authorize');
 const { validateIdParam } = require('../middleware/idParam');
 const { accountChangeLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
+router.param('id', validateIdParam('User not found'));
+
+// A Site Manager's own team. Everything after this is the Admin's.
+router.get('/team', authenticated, requirePermission('USERS', 'VIEW_TEAM'), userController.team);
+
 router.use(adminOnly);
-router.param('id', validateIdParam('Supervisor not found'));
 
 router.get('/', requirePermission('USERS', 'LIST'), userController.list);
 
-router.post(
-  '/supervisors',
-  requirePermission('USERS', 'CREATE_SUPERVISOR'),
-  userController.createSupervisor
-);
+const asSupervisor = (req, _res, next) => {
+  req.defaultRole = 'supervisor';
+  next();
+};
 
-router.put(
-  '/supervisors/:id',
-  requirePermission('USERS', 'UPDATE_SUPERVISOR'),
-  userController.updateSupervisor
-);
+// /members covers every role. /supervisors is the older path and stays for anything still calling it.
+router.post('/members', requirePermission('USERS', 'CREATE_SUPERVISOR'), userController.createMember);
+router.post('/supervisors', requirePermission('USERS', 'CREATE_SUPERVISOR'), asSupervisor, userController.createMember);
+
+router.put(['/members/:id', '/supervisors/:id'], requirePermission('USERS', 'UPDATE_SUPERVISOR'), userController.updateMember);
 
 router.patch(
-  '/supervisors/:id/status',
+  ['/members/:id/status', '/supervisors/:id/status'],
   requirePermission('USERS', 'SET_SUPERVISOR_STATUS'),
-  userController.setSupervisorStatus
+  userController.setMemberStatus
 );
 
 router.put(
-  '/supervisors/:id/password',
+  ['/members/:id/password', '/supervisors/:id/password'],
   requirePermission('USERS', 'CHANGE_SUPERVISOR_PASSWORD'),
-  userController.changeSupervisorPassword
+  accountChangeLimiter,
+  userController.changeMemberPassword
 );
+
+router.get('/members/:id/access', requirePermission('USERS', 'MANAGE_ACCESS'), userController.getMemberAccess);
+router.put('/members/:id/access', requirePermission('USERS', 'MANAGE_ACCESS'), userController.updateMemberAccess);
 
 router.put(
   '/me',

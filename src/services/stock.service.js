@@ -4,7 +4,7 @@ const { StockBalance, InventoryTransaction, Item, AssetIssue, AssetIssueItem, Is
 const { parseListQuery, parseEnumFilter } = require('../utils/queryOptions');
 const { requireIdFilter } = require('../utils/validation');
 const { buildListResponse } = require('../utils/listResponse');
-const { scopeToSite, supervisorSiteId } = require('./siteAccess');
+const { scopeToSite, siteFilterIds, siteCondition } = require('./siteAccess');
 const { costSummaryForBalances, keyOf } = require('./stockBatch.service');
 const { assetKey, loadAssetDetails } = require('./assetDetails.service');
 const { assetRefsMatchingNumber } = require('./assetIdentifier.service');
@@ -43,7 +43,7 @@ async function listStockBalances({ tenantId, auth, query }) {
   });
 
   const where = scopeToSite({ tenantId }, auth, 'siteId');
-  if (query.siteId && supervisorSiteId(auth) === null) where.siteId = requireIdFilter(query.siteId, 'Site');
+  if (query.siteId) where.siteId = siteCondition(siteFilterIds(auth, query.siteId));
   if (query.itemId) where.itemId = requireIdFilter(query.itemId, 'Item');
 
   const { rows, count } = await StockBalance.findAndCountAll({
@@ -126,7 +126,7 @@ async function listInventoryTransactions({ tenantId, auth, query }) {
   });
 
   const where = scopeToSite({ tenantId }, auth, 'siteId');
-  if (query.siteId && supervisorSiteId(auth) === null) where.siteId = requireIdFilter(query.siteId, 'Site');
+  if (query.siteId) where.siteId = siteCondition(siteFilterIds(auth, query.siteId));
   if (query.itemId) where.itemId = requireIdFilter(query.itemId, 'Item');
   const transactionType = parseEnumFilter(
     query.transactionType,

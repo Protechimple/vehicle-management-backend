@@ -15,7 +15,9 @@ const {
   scopeToSite,
   assertSiteAllowed,
   assertSiteChangeAllowed,
-  supervisorSiteId,
+  ownSiteFor,
+  siteFilterIds,
+  siteCondition,
 } = require('./siteAccess');
 const storage = require('./storage.service');
 const { assertSiteAssignable } = require('./site.service');
@@ -238,7 +240,7 @@ async function listVehicles({ tenantId, auth, query }) {
   const status = parseEnumFilter(query.status, Vehicle.STATUSES, 'Status') ?? 'active';
   const where = scopeToSite({ status }, auth);
   if (query.fuelType) where.fuelType = query.fuelType;
-  if (query.siteId && supervisorSiteId(auth) === null) where.currentSiteId = requireNumber(query.siteId, 'Site', { min: 1 });
+  if (query.siteId) where.currentSiteId = siteCondition(siteFilterIds(auth, query.siteId));
 
   const search = typeof query.search === 'string' ? query.search.trim() : '';
   if (search) {
@@ -264,7 +266,7 @@ async function getVehicle({ tenantId, auth, id }) {
 async function createVehicle({ tenantId, auth, actingUserId, payload, files }) {
   const baseInput = readVehicleBaseInput(payload);
   const siteInput = readCurrentSiteIdInput(payload);
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, siteInput.currentSiteId);
   if (ownSiteId !== null) siteInput.currentSiteId = ownSiteId;
   const meterInput = readMeterInputForCreate(payload, baseInput.type);
   const input = { ...baseInput, ...siteInput, ...meterInput };
@@ -417,10 +419,11 @@ async function updateVehicle({ tenantId, auth, actingUserId, id, payload }) {
   return toPublic(updated);
 }
 
-async function deleteVehicle({ tenantId, actingUserId, id, confirmation }) {
+async function deleteVehicle({ tenantId, auth, actingUserId, id, confirmation }) {
   const archived = await archiveEntity({
     model: Vehicle,
     entityType: 'Vehicle',
+    dependencyCheck: (record) => assertSiteAllowed(auth, record.currentSiteId, 'Vehicle not found'),
     tenantId,
     id,
     confirmation,
@@ -430,10 +433,11 @@ async function deleteVehicle({ tenantId, actingUserId, id, confirmation }) {
   return toPublic(archived);
 }
 
-async function restoreVehicle({ tenantId, actingUserId, id }) {
+async function restoreVehicle({ tenantId, auth, actingUserId, id }) {
   const restored = await restoreEntity({
     model: Vehicle,
     entityType: 'Vehicle',
+    dependencyCheck: (record) => assertSiteAllowed(auth, record.currentSiteId, 'Vehicle not found'),
     tenantId,
     id,
     performedBy: actingUserId,

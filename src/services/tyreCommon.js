@@ -1,12 +1,11 @@
 const { Site, Vehicle, Machinery } = require('../models');
 const AppError = require('../utils/AppError');
-const { requireIdFilter } = require('../utils/validation');
-const { supervisorSiteId } = require('./siteAccess');
+const { siteFilterIds, siteCondition } = require('./siteAccess');
 
+// A where-clause value for the sites asked for, or every site the user covers. Null means every site.
 function siteFilter(auth, query) {
-  const own = supervisorSiteId(auth);
-  if (own !== null) return own;
-  return query.siteId ? requireIdFilter(query.siteId, 'Site') : null;
+  const siteIds = siteFilterIds(auth, query.siteId);
+  return siteIds ? siteCondition(siteIds) : null;
 }
 
 function meterTypeFor(assetType, asset) {

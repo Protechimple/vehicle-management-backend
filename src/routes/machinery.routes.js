@@ -1,6 +1,6 @@
 const express = require('express');
 const machineryController = require('../controllers/machinery.controller');
-const { authenticated, requirePermission } = require('../middleware/authorize');
+const { authenticated, requirePermission, requireAnyPermission, ASSET_LOOKUP } = require('../middleware/authorize');
 const { validateIdParam } = require('../middleware/idParam');
 const { uploadAssetCreationDocuments } = require('../middleware/upload');
 
@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(authenticated);
 router.param('id', validateIdParam('Machinery not found'));
 
-router.get('/', requirePermission('MACHINERY', 'READ'), machineryController.list);
+router.get('/', requireAnyPermission([['MACHINERY', 'READ'], ...ASSET_LOOKUP]), machineryController.list);
 
 router.get('/rcpl-availability', requirePermission('MACHINERY', 'READ'), machineryController.rcplAvailability);
 

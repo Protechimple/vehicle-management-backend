@@ -2,6 +2,7 @@ const express = require('express');
 const authRoutes = require('./auth.routes');
 const platformRoutes = require('./platform.routes');
 const userRoutes = require('./user.routes');
+const accessRoutes = require('./access.routes');
 const vehicleRoutes = require('./vehicle.routes');
 const machineryRoutes = require('./machinery.routes');
 const siteRoutes = require('./site.routes');
@@ -47,6 +48,7 @@ router.get('/health', async (_req, res) => {
 router.use('/platform', platformRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/access', accessRoutes);
 router.use('/vehicles', vehicleRoutes);
 router.use('/machinery', machineryRoutes);
 router.use('/sites', siteRoutes);

@@ -8,7 +8,7 @@ const { buildListResponse } = require('../utils/listResponse');
 const { createTenantScopedRepository } = require('./tenantScopedRepository');
 const { recordCreate, recordUpdate } = require('./audit.service');
 const { nextSequentialCode, isCodeCollision } = require('./codeGenerator');
-const { supervisorSiteId, assertSiteAllowed } = require('./siteAccess');
+const { ownSiteFor, assertSiteAllowed } = require('./siteAccess');
 const { requireBusinessDate, optionalDateFilter, roundMoney, siteNamesById } = require('./fuelCommon');
 const { siteFilter, assertSiteUsable, readTime } = require('./tyreCommon');
 const { createPurchasedTyres } = require('./tyre.service');
@@ -104,7 +104,7 @@ async function getTyrePurchase({ tenantId, auth, id }) {
 }
 
 async function createTyrePurchase({ tenantId, auth, actingUserId, payload }) {
-  const ownSiteId = supervisorSiteId(auth);
+  const ownSiteId = ownSiteFor(auth, payload.siteId);
   const siteId = ownSiteId ?? (await assertSiteUsable(tenantId, payload.siteId));
   const supplierName = optionalText(payload.supplierName, 'Supplier', { max: 255 });
   const purchaseDate = requireBusinessDate(payload.purchaseDate, 'Purchase date');
