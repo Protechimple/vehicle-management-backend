@@ -46,6 +46,19 @@ const PERMISSIONS = Object.freeze({
   BATTERY: Object.freeze({ ...standardModule, SCRAP: SITE_STAFF, EDIT_DETAILS: ADMIN_ONLY }),
   FUEL: standardModule,
   ADBLUE: standardModule,
+  // Centring Inventory works like the Inventory module, site by site. The Admin sets up the catalog, moves stock
+  // between sites and deletes entries; site staff buy into, issue from and adjust their own sites' stock. Prices,
+  // values and reports are for the Admin and Site Managers.
+  CENTRING: Object.freeze({
+    READ: EVERYONE,
+    MANAGE_CATALOG: ADMIN_ONLY,
+    PURCHASE: EVERYONE,
+    ISSUE: EVERYONE,
+    TRANSFER: ADMIN_ONLY,
+    ADJUST: EVERYONE,
+    DELETE: ADMIN_ONLY,
+    VIEW_COST: [ROLES.ADMIN, ROLES.SITE_MANAGER],
+  }),
   COMPLIANCE: standardModule,
 
   SITE: Object.freeze({
@@ -132,6 +145,11 @@ const ACTION_LABELS = Object.freeze({
   PRINT: 'Print',
   EXPORT: 'Export',
   TRANSFER: 'Transfer',
+  MANAGE_CATALOG: 'Manage catalog',
+  PURCHASE: 'Purchase',
+  ISSUE: 'Issue',
+  ADJUST: 'Adjust',
+  VIEW_COST: 'See costs',
 });
 
 // What the Admin's access screen shows, grouped as the sidebar groups it. Anything not listed here keeps its built-in
@@ -176,6 +194,7 @@ const ACCESS_MODULES = Object.freeze([
   },
   { key: 'tyres', label: 'Tyres', resources: [{ resource: 'TYRE', label: 'Tyres' }] },
   { key: 'batteries', label: 'Batteries', resources: [{ resource: 'BATTERY', label: 'Batteries' }] },
+  { key: 'centring', label: 'Centring Inventory', resources: [{ resource: 'CENTRING', label: 'Centring inventory' }] },
   { key: 'reports', label: 'Reports', resources: [{ resource: 'REPORTS', label: 'Reports' }] },
 ]);
 
