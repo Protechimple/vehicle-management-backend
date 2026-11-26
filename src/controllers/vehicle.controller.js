@@ -1,4 +1,5 @@
 const vehicleService = require('../services/vehicle.service');
+const vehicleImportService = require('../services/vehicleImport.service');
 const { AssetDocument } = require('../models');
 
 function readAssetDocumentFiles(files) {
@@ -68,4 +69,35 @@ async function costs(req, res) {
   res.status(200).json({ data, message: 'Vehicle costs retrieved' });
 }
 
-module.exports = { list, get, create, update, remove, restore, history, costs };
+async function importTemplate(req, res) {
+  const buffer = await vehicleImportService.buildTemplate({ tenantId: req.auth.tenantId, auth: req.auth });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="vehicle-import-template.xlsx"');
+  res.status(200).send(Buffer.from(buffer));
+}
+
+async function importPreview(req, res) {
+  const data = await vehicleImportService.previewImport({ tenantId: req.auth.tenantId, auth: req.auth, file: req.file });
+  res.status(200).json({ data, message: 'Sheet checked' });
+}
+
+async function importCommit(req, res) {
+  const result = await vehicleImportService.commitImport({
+    tenantId: req.auth.tenantId,
+    auth: req.auth,
+    actingUserId: req.auth.userId,
+    file: req.file,
+  });
+  if (!result.ok) {
+    return res.status(400).json({
+      error: `${result.preview.summary.invalid} row(s) have errors. Nothing was imported.`,
+      data: result.preview,
+    });
+  }
+  return res.status(201).json({
+    data: { created: result.created, vehicles: result.vehicles },
+    message: `${result.created} vehicle(s) imported`,
+  });
+}
+
+module.exports = { list, get, create, update, remove, restore, history, costs, importTemplate, importPreview, importCommit };

@@ -2,7 +2,7 @@ const express = require('express');
 const vehicleController = require('../controllers/vehicle.controller');
 const { authenticated, requirePermission, requireAnyPermission, ASSET_LOOKUP } = require('../middleware/authorize');
 const { validateIdParam } = require('../middleware/idParam');
-const { uploadAssetCreationDocuments } = require('../middleware/upload');
+const { uploadAssetCreationDocuments, uploadImportSheet } = require('../middleware/upload');
 
 const router = express.Router();
 
@@ -17,6 +17,11 @@ router.post(
   uploadAssetCreationDocuments,
   vehicleController.create
 );
+
+// Bulk import. Declared before /:id so "import" is not read as a vehicle id.
+router.get('/import/template', requirePermission('VEHICLE', 'CREATE'), vehicleController.importTemplate);
+router.post('/import/preview', requirePermission('VEHICLE', 'CREATE'), uploadImportSheet, vehicleController.importPreview);
+router.post('/import', requirePermission('VEHICLE', 'CREATE'), uploadImportSheet, vehicleController.importCommit);
 
 router.get('/:id', requirePermission('VEHICLE', 'READ'), vehicleController.get);
 

@@ -8,6 +8,7 @@ const machineryRoutes = require('./machinery.routes');
 const siteRoutes = require('./site.routes');
 const complianceRoutes = require('./complianceDocument.routes');
 const assetDocumentRoutes = require('./assetDocument.routes');
+const assetPhotoRoutes = require('./assetPhoto.routes');
 const siteAssignmentRoutes = require('./siteAssignment.routes');
 const itemCategoryRoutes = require('./itemCategory.routes');
 const unitOfMeasureRoutes = require('./unitOfMeasure.routes');
@@ -54,6 +55,7 @@ router.use('/machinery', machineryRoutes);
 router.use('/sites', siteRoutes);
 router.use('/compliance', complianceRoutes);
 router.use('/documents', assetDocumentRoutes);
+router.use('/photos', assetPhotoRoutes);
 router.use('/site-assignments', siteAssignmentRoutes);
 
 router.use('/item-categories', itemCategoryRoutes);
