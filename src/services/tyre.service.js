@@ -762,17 +762,29 @@ async function summary({ tenantId, auth, query }) {
   const where = siteId ? await atSiteCondition(tenantId, siteId) : {};
   const rows = await Tyre.findAll({
     where: { [Op.and]: [{ tenantId }, where] },
-    attributes: ['tyreStatus', [fn('COUNT', col('id')), 'count'], [fn('SUM', col('purchase_cost')), 'value']],
+    attributes: [
+      'tyreStatus',
+      [fn('COUNT', col('id')), 'count'],
+      [fn('SUM', col('purchase_cost')), 'value'],
+      [fn('SUM', col('repair_cost')), 'repairs'],
+      [fn('SUM', col('scrap_value')), 'scrapValue'],
+    ],
     group: ['tyreStatus'],
     raw: true,
   });
   const counts = Object.fromEntries(Tyre.STATUSES.map((s) => [s, 0]));
   let newStoreValue = 0;
+  // Scrapped tyres: what they cost (bought + repairs, like each tyre's total cost) and what their scrap brought back.
+  const scrapped = { cost: 0, scrapValue: 0 };
   for (const r of rows) {
     counts[r.tyreStatus] = Number(r.count);
     if (r.tyreStatus === 'new') newStoreValue = roundMoney(Number(r.value ?? 0));
+    if (r.tyreStatus === 'scrapped') {
+      scrapped.cost = roundMoney(Number(r.value ?? 0) + Number(r.repairs ?? 0));
+      scrapped.scrapValue = roundMoney(Number(r.scrapValue ?? 0));
+    }
   }
-  return { counts, newStoreValue };
+  return { counts, newStoreValue, scrapped };
 }
 
 async function getTyre({ tenantId, auth, id }) {
