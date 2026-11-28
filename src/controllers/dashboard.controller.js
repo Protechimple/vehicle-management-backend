@@ -1,5 +1,6 @@
 const dashboardService = require('../services/dashboard.service');
 const maintenanceService = require('../services/maintenance.service');
+const moduleService = require('../services/dashboardModules.service');
 const { requireNumber } = require('../utils/validation');
 
 async function summary(req, res) {
@@ -17,15 +18,27 @@ async function fleet(req, res) {
   res.status(200).json({ data, message: 'Fleet counts retrieved' });
 }
 
-async function sites(req, res) {
-  const data = await dashboardService.getSiteBreakdown({ tenantId: req.auth.tenantId, auth: req.auth, query: req.query });
-  res.status(200).json({ data, message: 'Site breakdown retrieved' });
-}
-
 async function maintenance(req, res) {
   const siteId = req.query.siteId ? requireNumber(req.query.siteId, 'Site', { min: 1 }) : null;
   const data = await maintenanceService.getDashboardSummary({ tenantId: req.auth.tenantId, auth: req.auth, siteId });
   res.status(200).json({ data, message: 'Maintenance summary retrieved' });
 }
 
-module.exports = { summary, monthlyCost, fleet, sites, maintenance };
+const read = (req) => ({ tenantId: req.auth.tenantId, auth: req.auth, query: req.query });
+
+async function tyres(req, res) {
+  const data = await moduleService.getTyreSummary(read(req));
+  res.status(200).json({ data, message: 'Tyre summary retrieved' });
+}
+
+async function adblue(req, res) {
+  const data = await moduleService.getAdBlueSummary(read(req));
+  res.status(200).json({ data, message: 'AdBlue summary retrieved' });
+}
+
+async function centring(req, res) {
+  const data = await moduleService.getCentringSummary(read(req));
+  res.status(200).json({ data, message: 'Centring summary retrieved' });
+}
+
+module.exports = { summary, monthlyCost, fleet, maintenance, tyres, adblue, centring };

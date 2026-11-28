@@ -48,6 +48,13 @@ const AdBluePurchase = require('./AdBluePurchase');
 const AdBlueFilling = require('./AdBlueFilling');
 const Battery = require('./Battery');
 const BatteryEvent = require('./BatteryEvent');
+const CentringCategory = require('./CentringCategory');
+const CentringSubCategory = require('./CentringSubCategory');
+const CentringSupplier = require('./CentringSupplier');
+const CentringItem = require('./CentringItem');
+const CentringUnit = require('./CentringUnit');
+const CentringEntry = require('./CentringEntry');
+const CentringEntryLine = require('./CentringEntryLine');
 const UserSite = require('./UserSite');
 const RolePermission = require('./RolePermission');
 const UserPermission = require('./UserPermission');
@@ -287,6 +294,17 @@ Battery.belongsTo(Site, { foreignKey: 'siteId', as: 'site' });
 Battery.hasMany(BatteryEvent, { foreignKey: 'batteryId', as: 'events' });
 BatteryEvent.belongsTo(Battery, { foreignKey: 'batteryId', as: 'battery' });
 
+Tenant.hasMany(CentringItem, { foreignKey: 'tenantId', as: 'centringItems' });
+Tenant.hasMany(CentringUnit, { foreignKey: 'tenantId', as: 'centringUnits' });
+Tenant.hasMany(CentringEntry, { foreignKey: 'tenantId', as: 'centringEntries' });
+CentringSubCategory.belongsTo(CentringCategory, { foreignKey: 'categoryId', as: 'category' });
+CentringItem.belongsTo(CentringCategory, { foreignKey: 'categoryId', as: 'category' });
+CentringItem.belongsTo(CentringSubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
+CentringEntry.belongsTo(CentringSupplier, { foreignKey: 'supplierId', as: 'supplier' });
+CentringEntry.hasMany(CentringEntryLine, { foreignKey: 'entryId', as: 'lines' });
+CentringEntryLine.belongsTo(CentringEntry, { foreignKey: 'entryId', as: 'entry' });
+CentringEntryLine.belongsTo(CentringItem, { foreignKey: 'itemId', as: 'item' });
+
 module.exports = {
   sequelize,
   Tenant,
@@ -338,6 +356,13 @@ module.exports = {
   AdBlueFilling,
   Battery,
   BatteryEvent,
+  CentringCategory,
+  CentringSubCategory,
+  CentringSupplier,
+  CentringItem,
+  CentringUnit,
+  CentringEntry,
+  CentringEntryLine,
   UserSite,
   RolePermission,
   UserPermission,
