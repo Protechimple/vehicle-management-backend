@@ -45,7 +45,43 @@ const logoUpload = multer({
   },
 });
 
+// Spreadsheets for bulk import. Browsers label .csv files inconsistently (text/csv, application/vnd.ms-excel, …),
+// so the extension decides; the parser rejects anything that is not really a workbook or CSV.
+const SHEET_EXTENSIONS = /\.(xlsx|csv)$/i;
+
+const importSheetUpload = multer({
+  defParamCharset: 'utf8',
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: 1 },
+  fileFilter(_req, file, callback) {
+    if (!SHEET_EXTENSIONS.test(file.originalname ?? '')) {
+      return callback(AppError.badRequest('Only .xlsx and .csv files can be imported'));
+    }
+    callback(null, true);
+  },
+});
+
+const PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+// A photo arrives with the small thumbnail the browser made from it.
+const assetPhotoUpload = multer({
+  defParamCharset: 'utf8',
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: 2 },
+  fileFilter(_req, file, callback) {
+    if (!PHOTO_MIME_TYPES.has(file.mimetype)) {
+      return callback(AppError.badRequest('Photos must be JPG, PNG or WEBP images'));
+    }
+    callback(null, true);
+  },
+});
+
 module.exports = {
+  uploadImportSheet: importSheetUpload.single('file'),
+  uploadAssetPhoto: assetPhotoUpload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'thumb', maxCount: 1 },
+  ]),
   uploadSingleDocument: singleDocumentUpload.single('file'),
   uploadLogo: logoUpload.single('logo'),
   MAX_LOGO_SIZE_BYTES,

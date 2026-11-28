@@ -383,6 +383,9 @@ module.exports = {
   listComplianceDocuments,
   upsertComplianceDocument,
   saveComplianceDocuments,
+  readComplianceInput,
+  isDocEntered,
+  DOC_TYPE_PAYLOAD_KEYS,
   listCompliance,
   getComplianceAlerts,
 };

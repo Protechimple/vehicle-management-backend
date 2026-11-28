@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 
-const { sequelize, Vehicle, AuditLog } = require('../models');
+const { sequelize, Vehicle, AuditLog, AssetDocument, AssetPhoto } = require('../models');
 const AppError = require('../utils/AppError');
 const { requireText, optionalText, requireNumber } = require('../utils/validation');
 const { assertMeterNotDecreasing } = require('../utils/meter');
@@ -26,7 +26,12 @@ const {
   assertChassisNumberAvailable,
   assertRegistrationNumberAvailable,
 } = require('./assetIdentifier.service');
-const { saveComplianceDocuments } = require('./complianceDocument.service');
+const {
+  saveComplianceDocuments,
+  readComplianceInput,
+  isDocEntered,
+  DOC_TYPE_PAYLOAD_KEYS,
+} = require('./complianceDocument.service');
 const { getMandatoryDocTypes, createDocumentsForNewAsset } = require('./assetDocument.service');
 
 const repo = createTenantScopedRepository(Vehicle);
@@ -36,8 +41,49 @@ const DEFAULT_SORT = 'createdAt:desc';
 
 const ASSET_ID_GENERATION_ATTEMPTS = 5;
 
-function toPublic(vehicle) {
-  return vehicle.toPublicJSON();
+function toPublic(vehicle, extras) {
+  const data = vehicle.toPublicJSON();
+  if (!extras) return data;
+  return {
+    ...data,
+    missingDocTypes: extras.missingDocTypes.get(vehicle.assetId) ?? [],
+    coverPhotoId: extras.coverPhotoIds.get(vehicle.assetId) ?? null,
+  };
+}
+
+// Which mandatory documents each vehicle still lacks, and its cover photo: one query each for the whole page.
+async function loadListExtras(tenantId, vehicles) {
+  const assetIds = vehicles.map((v) => v.assetId);
+  const mandatory = getMandatoryDocTypes('VEHICLE');
+  const [docs, covers] = assetIds.length
+    ? await Promise.all([
+        AssetDocument.findAll({
+          where: { tenantId, assetType: 'VEHICLE', assetId: assetIds, docType: mandatory },
+          attributes: ['assetId', 'docType'],
+        }),
+        AssetPhoto.findAll({
+          where: { tenantId, assetType: 'VEHICLE', assetId: assetIds, isCover: true },
+          attributes: ['id', 'assetId'],
+        }),
+      ])
+    : [[], []];
+
+  const present = new Set(docs.map((d) => `${d.assetId}:${d.docType}`));
+  const missingDocTypes = new Map(
+    assetIds.map((assetId) => [assetId, mandatory.filter((docType) => !present.has(`${assetId}:${docType}`))])
+  );
+  const coverPhotoIds = new Map(covers.map((c) => [c.assetId, c.id]));
+  return { missingDocTypes, coverPhotoIds };
+}
+
+// Vehicles without every mandatory document, for the "documents missing" filter.
+function missingMandatoryDocsCondition() {
+  const docTypes = getMandatoryDocTypes('VEHICLE').map((docType) => sequelize.escape(docType)).join(', ');
+  return sequelize.literal(`(
+    SELECT COUNT(DISTINCT d.doc_type) FROM asset_documents d
+     WHERE d.tenant_id = \`Vehicle\`.\`tenant_id\` AND d.asset_type = 'VEHICLE'
+       AND d.asset_id = \`Vehicle\`.\`asset_id\` AND d.doc_type IN (${docTypes})
+  ) < ${getMandatoryDocTypes('VEHICLE').length}`);
 }
 
 const ASSET_ID_PREFIX = 'VEH-';
@@ -251,16 +297,126 @@ async function listVehicles({ tenantId, auth, query }) {
     ];
   }
 
-  const { rows, count } = await repo.findAndCountAll(tenantId, { where, order, limit, offset });
+  if (query.docsMissing === 'true') where[Op.and] = [missingMandatoryDocsCondition()];
 
-  return buildListResponse(rows.map(toPublic), { page, limit, total: count });
+  const { rows, count } = await repo.findAndCountAll(tenantId, { where, order, limit, offset });
+  const extras = await loadListExtras(tenantId, rows);
+
+  return buildListResponse(
+    rows.map((vehicle) => toPublic(vehicle, extras)),
+    { page, limit, total: count }
+  );
 }
 
 async function getVehicle({ tenantId, auth, id }) {
   const vehicle = await repo.findByPk(tenantId, id);
   if (!vehicle) throw AppError.notFound('Vehicle not found');
   assertSiteAllowed(auth, vehicle.currentSiteId, 'Vehicle not found');
-  return toPublic(vehicle);
+  return toPublic(vehicle, await loadListExtras(tenantId, [vehicle]));
+}
+
+// Checks one candidate vehicle the way createVehicle does, but reports every problem instead of stopping at the first.
+// Returns the input createVehicle would save. Uniqueness and site existence need the database and are checked by the caller.
+function validateVehicleCandidate(payload, auth) {
+  const errors = [];
+  const attempt = (field, read) => {
+    try {
+      return read();
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      errors.push({ field, message: error.message });
+      return undefined;
+    }
+  };
+
+  const baseInput = {};
+  const requiredBaseFields = ['registrationNumber', 'type', 'fuelType'];
+  for (const field of [...requiredBaseFields, 'modelNumber', 'chassisNumber', 'year']) {
+    // The partial reader skips an absent field, so a required one is passed as blank to be reported.
+    const value = payload[field] ?? (requiredBaseFields.includes(field) ? '' : undefined);
+    const read = attempt(field, () => readVehicleBaseInput({ [field]: value }, { partial: true }));
+    if (read) Object.assign(baseInput, read);
+  }
+
+  const siteInput = attempt('currentSiteId', () => {
+    const input = readCurrentSiteIdInput(payload);
+    const ownSiteId = ownSiteFor(auth, input.currentSiteId);
+    if (ownSiteId !== null) input.currentSiteId = ownSiteId;
+    return input;
+  });
+
+  const meterInput = baseInput.type
+    ? attempt(isHoursBasedType(baseInput.type) ? 'currentHours' : 'currentKM', () =>
+        readMeterInputForCreate(payload, baseInput.type)
+      )
+    : undefined;
+
+  const compliance = {};
+  for (const [docType, key] of Object.entries(DOC_TYPE_PAYLOAD_KEYS)) {
+    const raw = payload.compliance?.[key];
+    if (!isDocEntered(docType, raw)) continue;
+    if (attempt(`compliance.${key}`, () => readComplianceInput(docType, raw))) compliance[key] = raw;
+  }
+
+  return { input: { ...baseInput, ...siteInput, ...meterInput }, compliance, errors };
+}
+
+// Saves a validated vehicle with its audit entry, site assignment, compliance and documents. Runs inside the caller's transaction.
+async function insertVehicle({ tenantId, actingUserId, input, compliance, files, savedKeys, transaction }) {
+  let created;
+
+  for (let attempt = 1; attempt <= ASSET_ID_GENERATION_ATTEMPTS; attempt += 1) {
+    const assetId = await generateAssetId(tenantId, { transaction });
+    try {
+      created = await repo.create(
+        tenantId,
+        { ...input, assetId, createdBy: actingUserId, updatedBy: actingUserId },
+        { transaction }
+      );
+      break;
+    } catch (error) {
+      const isLastAttempt = attempt === ASSET_ID_GENERATION_ATTEMPTS;
+      if (!isAssetIdCollision(error) || isLastAttempt) throw error;
+    }
+  }
+
+  await recordCreate(
+    { tenantId, entityType: 'Vehicle', entityId: created.id, performedBy: actingUserId, after: created },
+    { transaction }
+  );
+
+  await recordSiteAssignment({
+    tenantId,
+    assetType: 'VEHICLE',
+    assetId: created.assetId,
+    previousSiteId: null,
+    nextSiteId: created.currentSiteId,
+    actingUserId,
+    transaction,
+  });
+
+  await saveComplianceDocuments({
+    tenantId,
+    assetType: 'VEHICLE',
+    assetId: created.assetId,
+    actingUserId,
+    compliance,
+    transaction,
+  });
+
+  if (files) {
+    await createDocumentsForNewAsset({
+      tenantId,
+      assetType: 'VEHICLE',
+      assetId: created.assetId,
+      actingUserId,
+      files,
+      savedKeys,
+      transaction,
+    });
+  }
+
+  return created;
 }
 
 async function createVehicle({ tenantId, auth, actingUserId, payload, files }) {
@@ -282,65 +438,9 @@ async function createVehicle({ tenantId, auth, actingUserId, payload, files }) {
   const savedKeys = [];
 
   try {
-    const vehicle = await sequelize.transaction(async (transaction) => {
-      let created;
-
-      for (let attempt = 1; attempt <= ASSET_ID_GENERATION_ATTEMPTS; attempt += 1) {
-        const assetId = await generateAssetId(tenantId, { transaction });
-        try {
-          created = await repo.create(
-            tenantId,
-            {
-              ...input,
-              assetId,
-              createdBy: actingUserId,
-              updatedBy: actingUserId,
-            },
-            { transaction }
-          );
-          break;
-        } catch (error) {
-          const isLastAttempt = attempt === ASSET_ID_GENERATION_ATTEMPTS;
-          if (!isAssetIdCollision(error) || isLastAttempt) throw error;
-        }
-      }
-
-      await recordCreate(
-        { tenantId, entityType: 'Vehicle', entityId: created.id, performedBy: actingUserId, after: created },
-        { transaction }
-      );
-
-      await recordSiteAssignment({
-        tenantId,
-        assetType: 'VEHICLE',
-        assetId: created.assetId,
-        previousSiteId: null,
-        nextSiteId: created.currentSiteId,
-        actingUserId,
-        transaction,
-      });
-
-      await saveComplianceDocuments({
-        tenantId,
-        assetType: 'VEHICLE',
-        assetId: created.assetId,
-        actingUserId,
-        compliance,
-        transaction,
-      });
-
-      await createDocumentsForNewAsset({
-        tenantId,
-        assetType: 'VEHICLE',
-        assetId: created.assetId,
-        actingUserId,
-        files,
-        savedKeys,
-        transaction,
-      });
-
-      return created;
-    });
+    const vehicle = await sequelize.transaction((transaction) =>
+      insertVehicle({ tenantId, actingUserId, input, compliance, files, savedKeys, transaction })
+    );
 
     return toPublic(vehicle);
   } catch (error) {
@@ -482,4 +582,6 @@ module.exports = {
   restoreVehicle,
   getVehicleHistory,
   getVehicleCosts,
+  validateVehicleCandidate,
+  insertVehicle,
 };

@@ -9,6 +9,7 @@ const Machinery = require('./Machinery');
 const Site = require('./Site');
 const ComplianceDocument = require('./ComplianceDocument');
 const AssetDocument = require('./AssetDocument');
+const AssetPhoto = require('./AssetPhoto');
 const SiteAssignment = require('./SiteAssignment');
 const ItemCategory = require('./ItemCategory');
 const UnitOfMeasure = require('./UnitOfMeasure');
@@ -105,6 +106,7 @@ Site.hasMany(Machinery, { foreignKey: 'currentSiteId', as: 'machinery' });
 Machinery.belongsTo(Site, { foreignKey: 'currentSiteId', as: 'currentSite' });
 
 AssetDocument.belongsTo(User, { foreignKey: 'uploadedBy', as: 'uploader' });
+AssetPhoto.belongsTo(User, { foreignKey: 'uploadedBy', as: 'uploader' });
 
 Tenant.hasMany(SiteAssignment, { foreignKey: 'tenantId', as: 'siteAssignments' });
 SiteAssignment.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
@@ -315,6 +317,7 @@ module.exports = {
   Site,
   ComplianceDocument,
   AssetDocument,
+  AssetPhoto,
   SiteAssignment,
   ItemCategory,
   UnitOfMeasure,
